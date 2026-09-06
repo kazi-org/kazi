@@ -159,30 +159,50 @@ defmodule Kazi.CLIApplyRenderTreeTest do
     path
   end
 
-  # Snapshots `pkg/foo/AGENTS.md` from the harness's own cwd (the run's
-  # effective workspace) BEFORE it converges the goal -- proving the render
-  # already ran by dispatch time, not merely that it runs EVENTUALLY. The
-  # marker path is ALWAYS double-quoted in the generated script: ExUnit's
-  # `:tmp_dir` slugifies the test's own description into the path, and an
-  # unquoted redirect target breaks (silently, as an unterminated shell
-  # quote swallowing the rest of the script) the moment a test name's
-  # punctuation lands in that slug.
+  # Snapshots `AGENTS.md` from the harness's own cwd BEFORE it converges the
+  # goal -- proving the render already ran by dispatch time, not merely that
+  # it runs EVENTUALLY. Since T72.7 (ADR-0086 decision 7), a scoped goal's
+  # `kazi apply` dispatches the harness AT its declared scope root by
+  # default (no `--cwd` needed) -- so the harness's own cwd IS `pkg/foo`
+  # here, and it checks `AGENTS.md` there directly rather than
+  # `pkg/foo/AGENTS.md` relative to the workspace root. The predicate
+  # (`test -f fixed.txt`) is still observed against the dispatch WORKSPACE
+  # ROOT regardless of the harness's launch cwd (T72.7 moves only the
+  # harness's own launch directory) -- that root is `git rev-parse
+  # --show-toplevel` from wherever the harness's cwd landed (the isolated
+  # task worktree's root, not the test's own `work` fixture path, which
+  # T50.1 never dispatches in directly), so `fixed.txt` is written there
+  # rather than via a bare relative `fixed.txt` (now `pkg/foo/fixed.txt`)
+  # or the test fixture's own `work` path (a different directory entirely
+  # once T50.1's worktree isolation is in play). The marker path is ALWAYS
+  # double-quoted in the generated script: ExUnit's `:tmp_dir` slugifies the
+  # test's own description into the path, and an unquoted redirect target
+  # breaks (silently, as an unterminated shell quote swallowing the rest of
+  # the script) the moment a test name's punctuation lands in that slug.
   defp agents_md_recording_harness(tmp_dir, marker) do
     write_stub(
       tmp_dir,
       "agents-md-recording",
-      "if [ -f pkg/foo/AGENTS.md ]; then\n" <>
+      "if [ -f AGENTS.md ]; then\n" <>
         "  echo \"FOUND\" > \"#{marker}\"\n" <>
-        "  cat pkg/foo/AGENTS.md >> \"#{marker}\"\n" <>
+        "  cat AGENTS.md >> \"#{marker}\"\n" <>
         "else\n" <>
         "  echo \"MISSING\" > \"#{marker}\"\n" <>
         "fi\n" <>
-        "echo \"the converged fix\" > fixed.txt\nexit 0"
+        "echo \"the converged fix\" > \"$(git rev-parse --show-toplevel)/fixed.txt\"\nexit 0"
     )
   end
 
+  # T72.7: writes `fixed.txt` at the dispatch workspace root (found via `git
+  # rev-parse --show-toplevel`, since the harness's own launch cwd is the
+  # scope root, `pkg/foo`, not the workspace root the predicate is observed
+  # against) -- see `agents_md_recording_harness/2`'s doc for why.
   defp passing_harness(tmp_dir) do
-    write_stub(tmp_dir, "passing", "echo \"the converged fix\" > fixed.txt\nexit 0")
+    write_stub(
+      tmp_dir,
+      "passing",
+      "echo \"the converged fix\" > \"$(git rev-parse --show-toplevel)/fixed.txt\"\nexit 0"
+    )
   end
 
   defp write_stub(tmp_dir, name, body) do

@@ -167,6 +167,7 @@ defmodule Kazi.CLI do
     base: :string,
     lane_contract: :string,
     resume_pr: :string,
+    cwd: :string,
     strict_landing: :boolean,
     integration: :string,
     integration_command: :string,
@@ -321,6 +322,22 @@ defmodule Kazi.CLI do
       "`apply` only (TKE.1/TKE.2, ADR-0086/ADR-0087): path to a contract.json-shaped lane contract (an hq/sire dispatcher's per-lane payload — run_id, task, task_sha, goal, predicates, budget, render_sha256, ... — the exact shape is owned by the dispatcher, not kazi). The equivalent env var KAZI_LANE_CONTRACT (mirroring --single-node/KAZI_SINGLE_NODE's CLI-flag-or-env pattern, since ADR-0086's lane adapter passes dispatch inputs by contract file + env, not a CLI rewrite) is the mechanism a lane container sets without a CLI change; the flag wins when both are set. Kazi requires the contract's \"task_sha\" (a non-empty string) and reads an optional \"render_sha256\" (TKE.2, ADR-0086 decision 5(b)); every other field is neither validated nor required. Only ACTED ON in combination with --single-node --in-place (a governed lane has no worktree indirection — the workspace IS the edit site): before any predicate observation or harness dispatch, compares `git -C <workspace> rev-parse HEAD` against the contract's task_sha and refuses on mismatch (`\"reason\": \"lane_contract_violation\"`, `\"kind\": \"wrong_task_sha\"`, naming both shas) or on an unreadable/unparsable/incomplete contract (same reason, `\"kind\": \"invalid_contract\"`). On a task_sha match, for a goal that declares a `[scope]` root: re-renders the node from the current goal-file plus one observe pass (T72.3's `Kazi.Plan.Render.node/3`) and sha256-compares it against the contract's \"render_sha256\" — a mismatch refuses (`\"kind\": \"stale_render\"`, naming both shas), and an otherwise-valid contract that declares NO \"render_sha256\" also refuses (`\"kind\": \"render_sha256_missing\"`) rather than silently skipping the check; a scopeless goal has no node to compare (ADR-0086 decision 3) and skips this check. On a match (or a scopeless goal), proceeds exactly as today. Without --in-place it is accepted but INERT — documented, not silently ignored, since there is no worktree-free edit site yet to compare a HEAD against. A lone --lane-contract with NO --single-node is itself a refusal (`\"reason\": \"lane_contract_requires_single_node\"`), checked before anything else runs (goal load, fleet load) — a lane contract implies a governed lane, and a governed lane is always single_node. Unset (neither the flag nor the env var): behavior is byte-identical to today.",
     resume_pr:
       "`apply` only (TKE.5, `docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): names an already-open PR (a number, e.g. `42` or `#42`) this invocation continues against, rather than starting an unrelated fresh run. The equivalent env var KAZI_RESUME_PR (mirroring --lane-contract/KAZI_LANE_CONTRACT's flag-or-env pattern) is the mechanism a lane container sets without a CLI change; the flag wins when both are set, and both win over a lane contract's own \"resume_pr\" field (the contract is the fallback source, not the override). Kazi never holds a GitHub credential and never calls `gh`/the GitHub API to verify a named PR (the same lane-mode constraint TKE.3's --integration-command hook exists for) -- verification is LOCAL only: kazi looks up its own run registry for a prior run that recorded landing this exact PR number (via a completed --integration-command hook invocation, TKE.3), and separately checks (git only) whether the current workspace's checked-out HEAD is already an ancestor of the declared base (a strong local signal the PR already merged). A --resume-pr naming a PR kazi's own registry has no record of, or one whose branch already looks merged into the base, REFUSES before any predicate observation or harness dispatch (`\"reason\": \"resume_pr_invalid\"`, `\"kind\": \"resume_pr_not_found\"` or `\"resume_pr_already_landed\"`) rather than silently starting fresh. On a match, this run's registry row is persisted under the SAME run-lineage id as the run that opened/last landed that PR, so the fleet read-model records it as continuing the same logical task. Unset (neither the flag, the env var, nor a contract field): behavior is byte-identical to today (a fresh lineage per run).",
+    cwd:
+      "`apply` only (T72.7, ADR-0086 decision 7): the directory (relative to the " <>
+        "run's dispatch workspace -- the kazi-owned task worktree by default, or " <>
+        "--workspace itself under --in-place) the harness is launched in, instead " <>
+        "of the workspace root. Defaults to the goal's first declared `[scope]` " <>
+        "root (`Kazi.Scope.roots/1`) when the goal declares one -- so a goal " <>
+        "rooted at `pkg/foo` dispatches with cwd `<worktree>/pkg/foo` without " <>
+        "this flag, matching the walk-up `AGENTS.md` node T72.4/T72.5 deliver " <>
+        "there. A scopeless goal defaults to the workspace root (today's " <>
+        "behavior, unchanged). Resolved relative to the dispatch workspace and " <>
+        "REFUSED before any predicate observation or harness dispatch " <>
+        "(`\"reason\": \"cwd_outside_worktree\"`) when it resolves outside that " <>
+        "workspace -- e.g. `--cwd ../outside` -- the same fail-closed style as " <>
+        "--lane-contract/--resume-pr. Only the harness's launch directory moves; " <>
+        "predicate observation, the diff, and landing still operate over the " <>
+        "whole dispatch workspace exactly as before.",
     integration:
       "`apply` only (T45.11, #1620): override how the converged goal LANDS, one of `none` | `commit` | `branch` | `pr` | `merge` (the `[integration] mode` values). The primary way to land is to declare `[integration]` in the goal-file or proposal (honored end to end since #1620); this flag is the explicit override for landing an APPROVED proposal (or a goal-file) that did not declare one, without re-authoring -- e.g. `kazi apply <proposal-ref> --integration pr --base main`. Combine with `--base` for the target branch; `none` (the default) is converge-and-stop.",
     strict_landing:
@@ -426,6 +443,7 @@ defmodule Kazi.CLI do
         :base,
         :lane_contract,
         :resume_pr,
+        :cwd,
         :integration,
         :integration_command,
         :strict_landing
@@ -2294,6 +2312,7 @@ defmodule Kazi.CLI do
           base: flags[:base],
           lane_contract: lane_contract_path(flags),
           resume_pr: resume_pr_flag(flags),
+          cwd: flags[:cwd],
           integration: flags[:integration],
           integration_command: integration_command_path(flags),
           strict_landing: flags[:strict_landing] || false,
@@ -4230,7 +4249,148 @@ defmodule Kazi.CLI do
       :ok
   end
 
+  # T72.7 (ADR-0086 decision 7): resolve --cwd (or the goal's first scope
+  # root) against the FINAL dispatch workspace -- the isolated task worktree
+  # for the common case, or --workspace itself under --in-place -- and refuse
+  # before any predicate observation or harness dispatch when it resolves
+  # outside that workspace. This must run here, not earlier in `run_goal/4`'s
+  # cond, because the worktree-isolated path only learns its worktree's real
+  # path inside `run_goal_serial_in_worktree/4`'s reconciler callback; `workspace`
+  # here is always that final, resolved path.
   defp run_goal_serial_at(%Goal{} = goal, opts, persist?, runtime_opts, base_workspace, workspace) do
+    case resolve_dispatch_cwd(goal, opts, workspace) do
+      {:refuse, message, extra} ->
+        refuse_cwd_outside_worktree(message, extra, opts)
+
+      {:ok, dispatch_cwd} ->
+        run_goal_serial_at_with_cwd(
+          goal,
+          opts,
+          persist?,
+          runtime_opts,
+          base_workspace,
+          workspace,
+          dispatch_cwd
+        )
+    end
+  end
+
+  # An explicit `--cwd` is always FINAL once validated (a --cwd naming a
+  # file, or a directory that doesn't exist, simply fails to `cd` at dispatch
+  # time -- the user's own mistake to see and fix, not this function's to
+  # silently correct): `{resolved, false}`, `false` meaning "not a default,
+  # never re-checked". The DEFAULT (the goal's first declared `[scope]` root,
+  # ADR-0086 decision 7 precedent, already relied on by T72.6's
+  # `rendered_node_sha256/4`) is only PROVISIONALLY resolved here as
+  # `{resolved, true}` -- `finalize_dispatch_cwd/1` re-checks it's a real
+  # directory AFTER T72.4's AGENTS.md render has run (which itself may create
+  # the scope root's directory for a fresh/creation-mode goal, T72.4's own
+  # moduledoc): checking too early, before that render, would wrongly reject
+  # a brand-new package root that legitimately doesn't exist yet. `[scope]`
+  # `paths`/`write_paths` also narrow to individual FILES just as often as
+  # directories (issue #860's whole point) -- `write_paths = ["fixed.txt"]`
+  # is a real, existing fixture shape (`collateral_report_test.exs`) -- so a
+  # default that is STILL not a directory even after the render falls back to
+  # `nil` (the workspace root, today's behavior) rather than failing the
+  # harness's `cd`. `nil` (no --cwd, no declared root) also keeps dispatch at
+  # the workspace root, marked non-default (nothing left to re-check).
+  @spec resolve_dispatch_cwd(Goal.t(), keyword(), String.t()) ::
+          {:ok, {String.t() | nil, boolean()}} | {:refuse, String.t(), map()}
+  defp resolve_dispatch_cwd(%Goal{} = goal, opts, workspace) do
+    case opts[:cwd] do
+      explicit when is_binary(explicit) ->
+        case validate_dispatch_cwd(explicit, workspace) do
+          {:ok, resolved} -> {:ok, {resolved, false}}
+          {:refuse, _, _} = refusal -> refusal
+        end
+
+      _ ->
+        case first_scope_root(goal) do
+          nil ->
+            {:ok, {nil, false}}
+
+          root ->
+            case validate_dispatch_cwd(root, workspace) do
+              {:ok, resolved} -> {:ok, {resolved, true}}
+              {:refuse, _, _} = refusal -> refusal
+            end
+        end
+    end
+  end
+
+  # Re-checked right before the harness dispatches (see the call site's own
+  # doc): a default-derived candidate (`default? == true`) that is STILL not
+  # a real directory falls back to `nil`; an explicit `--cwd` or `nil`
+  # candidate (`default? == false`) passes through unchanged.
+  @spec finalize_dispatch_cwd({String.t() | nil, boolean()}) :: String.t() | nil
+  defp finalize_dispatch_cwd({nil, _default?}), do: nil
+  defp finalize_dispatch_cwd({resolved, false}), do: resolved
+  defp finalize_dispatch_cwd({resolved, true}), do: if(File.dir?(resolved), do: resolved)
+
+  defp validate_dispatch_cwd(requested, workspace) do
+    workspace_abs = Path.expand(workspace)
+    resolved = Path.expand(requested, workspace_abs)
+
+    if within_dir?(resolved, workspace_abs) do
+      {:ok, resolved}
+    else
+      message =
+        "--cwd #{requested} resolves to #{resolved}, outside the dispatch " <>
+          "workspace #{workspace_abs} -- refused before any predicate " <>
+          "observation or harness dispatch (T72.7, ADR-0086 decision 7). Pass " <>
+          "a --cwd inside the workspace/task worktree, or drop the flag to use " <>
+          "the workspace root (or the goal's declared scope root)."
+
+      {:refuse, message, %{reason: "cwd_outside_worktree"}}
+    end
+  end
+
+  defp first_scope_root(%Goal{scope: scope}) do
+    case Scope.roots(scope) do
+      [] -> nil
+      [root | _] -> strip_glob_suffix(root)
+    end
+  end
+
+  # A declared root can be a directory glob (`"pkg/foo/**"`/`"pkg/foo/*"`,
+  # `Kazi.Scope`'s own moduledoc) -- a real directory to `cd` into, not a
+  # literal path ending in `**`/`*`. Mirrors `Kazi.Scope`'s private
+  # `normalize_path/1` trimming (without the trailing `/` it adds, since this
+  # feeds `Path.expand/2` rather than a prefix comparison).
+  defp strip_glob_suffix(root) do
+    root
+    |> String.trim_trailing("/**")
+    |> String.trim_trailing("/*")
+  end
+
+  # Segment-aware "is `path` inside (or equal to) `dir`" check -- both already
+  # `Path.expand`ed absolute paths. Appends a trailing "/" to both before the
+  # prefix test so `/a/foo` never wrongly matches dir `/a/fo`.
+  defp within_dir?(path, dir) do
+    p = String.trim_trailing(path, "/") <> "/"
+    d = String.trim_trailing(dir, "/") <> "/"
+    String.starts_with?(p, d)
+  end
+
+  defp refuse_cwd_outside_worktree(message, extra, opts) do
+    if json?(opts) do
+      emit_json_error(message, extra)
+    else
+      IO.puts(:stderr, "error: #{message}")
+    end
+
+    1
+  end
+
+  defp run_goal_serial_at_with_cwd(
+         %Goal{} = goal,
+         opts,
+         persist?,
+         runtime_opts,
+         base_workspace,
+         workspace,
+         dispatch_cwd
+       ) do
     # TKE.3 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): computed up front so the
     # `:goal_source` forwarding below can skip itself when this run's DISPATCHED
     # goal differs from what is on disk (see `disable_mid_loop_integration_for_lane/2`'s
@@ -4348,6 +4508,16 @@ defmodule Kazi.CLI do
     # scoped-down follow-up (a hard-refusal apply-side policy, if wanted
     # later, is its own decision) rather than silently skipped.
     render_scope_tree_before_dispatch(goal, workspace)
+
+    # T72.7 (ADR-0086 decision 7): finalize the dispatch cwd HERE, AFTER the
+    # render above -- a default (scope-root-derived) candidate re-checks it's
+    # a real directory now that the render may have just created it (see
+    # `finalize_dispatch_cwd/1`'s own doc); an explicit `--cwd` (or no
+    # candidate at all) passes through unchanged. `nil` (no --cwd, no
+    # directory-shaped declared root) keeps dispatch at the workspace root --
+    # `Kazi.Loop.Data`'s `dispatch_cwd || workspace` fallback treats it
+    # byte-identically to today.
+    run_opts = maybe_put(run_opts, :dispatch_cwd, finalize_dispatch_cwd(dispatch_cwd))
 
     # T73.5 (ADR-0086/ADR-0087, CAPABILITY 3/4): when single_node was ON for
     # this run, stash the additive `single_node: true` marker onto the loop's
