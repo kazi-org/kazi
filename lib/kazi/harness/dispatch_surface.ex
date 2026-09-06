@@ -253,13 +253,22 @@ defmodule Kazi.Harness.DispatchSurface do
       else: Enum.reject(servers, &(&1.name == @graph_server))
   end
 
-  # The per-profile opt-in: the surface is applied only when the resolved profile
-  # in `adapter_opts[:profile]` advertises the economy opts (ADR-0047 "opt-in per
-  # profile with a version-gated capability check"). A test double or non-Claude
-  # harness that carries no `%Profile{}` (or one without these opts) is left
-  # alone.
+  @doc """
+  The per-profile opt-in: `true` only when the resolved profile in
+  `adapter_opts[:profile]` advertises the T36.1 economy opts (`:strict_mcp_config`,
+  `:mcp_config`, `:tools`) — today only the Claude profile does (ADR-0047 "opt-in
+  per profile with a version-gated capability check"). A test double or non-Claude
+  harness that carries no `%Profile{}` (or one without these opts) is left alone.
+
+  Public because `Kazi.Workspace.ensure_mcp_server/2` (issue #1833) reuses the
+  SAME condition to gate whether `.mcp.json` is written at all: a harness that
+  cannot pass `--strict-mcp-config`/`--mcp-config` explicitly (only Claude can)
+  has no way to opt OUT of an ambiently-discovered `.mcp.json` either, so writing
+  one into its workspace is not an opt-in surface restriction for it — it is an
+  unconditional, unremovable ambient MCP server the harness never asked for.
+  """
   @spec surface_supported?(keyword()) :: boolean()
-  defp surface_supported?(adapter_opts) do
+  def surface_supported?(adapter_opts) do
     case Keyword.get(adapter_opts, :profile) do
       %Profile{supported_opts: supported} when is_list(supported) ->
         :strict_mcp_config in supported and :mcp_config in supported and :tools in supported

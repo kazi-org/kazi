@@ -3,12 +3,20 @@ defmodule Kazi.WorkspaceTest do
   Hermetic tests for the T4.5 workspace preparation (ADR-0010 §3): the
   `.mcp.json` merge is idempotent + additive, and the graph-freshness step runs
   the injected `:graph_cmd` seam — never a real `code-review-graph` binary.
+
+  Issue #1833: `.mcp.json` injection is gated to harnesses whose profile can opt
+  back OUT of it (`--strict-mcp-config`, today only Claude) — see the "harness
+  gate" describe block below. Every OTHER describe block in this file exercises
+  the injection mechanism itself, so they pass a Claude `adapter_opts` explicitly
+  to keep exercising `:created`/`:merged`/`:present` rather than the new
+  `:skipped` branch.
   """
   use ExUnit.Case, async: true
 
   @moduletag :tmp_dir
 
   alias Kazi.Context.StaticGraphSource
+  alias Kazi.Harness.Registry
   alias Kazi.PredicateResult
   alias Kazi.Workspace
   alias Kazi.Workspace.Orientation
@@ -17,7 +25,8 @@ defmodule Kazi.WorkspaceTest do
 
   describe "prepare/2 — .mcp.json (graph MCP exposure)" do
     test "creates .mcp.json with the code-review-graph server when absent", %{tmp_dir: dir} do
-      assert {:ok, %{mcp: :created}} = Workspace.prepare(dir, graph_cmd: never_called())
+      assert {:ok, %{mcp: :created}} =
+               Workspace.prepare(dir, claude_opts(graph_cmd: never_called()))
 
       config = read_mcp(dir)
       assert %{"mcpServers" => %{@server_key => entry}} = config
@@ -35,7 +44,8 @@ defmodule Kazi.WorkspaceTest do
 
       write_mcp(dir, existing)
 
-      assert {:ok, %{mcp: :merged}} = Workspace.prepare(dir, graph_cmd: never_called())
+      assert {:ok, %{mcp: :merged}} =
+               Workspace.prepare(dir, claude_opts(graph_cmd: never_called()))
 
       config = read_mcp(dir)
       # Unrelated server preserved.
@@ -47,10 +57,14 @@ defmodule Kazi.WorkspaceTest do
     end
 
     test "is idempotent: writing twice yields a byte-identical file", %{tmp_dir: dir} do
-      assert {:ok, %{mcp: :created}} = Workspace.prepare(dir, graph_cmd: never_called())
+      assert {:ok, %{mcp: :created}} =
+               Workspace.prepare(dir, claude_opts(graph_cmd: never_called()))
+
       first = File.read!(Path.join(dir, ".mcp.json"))
 
-      assert {:ok, %{mcp: :present}} = Workspace.prepare(dir, graph_cmd: never_called())
+      assert {:ok, %{mcp: :present}} =
+               Workspace.prepare(dir, claude_opts(graph_cmd: never_called()))
+
       second = File.read!(Path.join(dir, ".mcp.json"))
 
       assert first == second
@@ -61,14 +75,59 @@ defmodule Kazi.WorkspaceTest do
         "mcpServers" => %{@server_key => %{"command" => "code-review-graph", "args" => ["mcp"]}}
       })
 
-      assert {:ok, %{mcp: :present}} = Workspace.prepare(dir, graph_cmd: never_called())
+      assert {:ok, %{mcp: :present}} =
+               Workspace.prepare(dir, claude_opts(graph_cmd: never_called()))
     end
 
     test "errors on a malformed existing .mcp.json rather than clobbering it", %{tmp_dir: dir} do
       File.write!(Path.join(dir, ".mcp.json"), "{ this is not json")
 
       assert {:error, {:invalid_mcp_json, _path, _reason}} =
-               Workspace.prepare(dir, graph_cmd: never_called())
+               Workspace.prepare(dir, claude_opts(graph_cmd: never_called()))
+    end
+  end
+
+  describe "prepare/2 — harness gate on .mcp.json injection (issue #1833)" do
+    test "an opencode-profile dispatch never writes .mcp.json — it has no way to opt back out",
+         %{tmp_dir: dir} do
+      {:ok, opencode_profile} = Registry.fetch(:opencode)
+
+      assert {:ok, %{mcp: :skipped}} =
+               Workspace.prepare(dir,
+                 graph_cmd: never_called(),
+                 adapter_opts: [profile: opencode_profile]
+               )
+
+      refute File.exists?(Path.join(dir, ".mcp.json"))
+    end
+
+    test "an opencode dispatch leaves an existing hand-authored .mcp.json completely untouched",
+         %{tmp_dir: dir} do
+      {:ok, opencode_profile} = Registry.fetch(:opencode)
+      existing = %{"mcpServers" => %{"other" => %{"command" => "other-server"}}}
+      write_mcp(dir, existing)
+
+      assert {:ok, %{mcp: :skipped}} =
+               Workspace.prepare(dir,
+                 graph_cmd: never_called(),
+                 adapter_opts: [profile: opencode_profile]
+               )
+
+      assert read_mcp(dir) == existing
+    end
+
+    test "no :adapter_opts at all (a bare test double / no resolved profile) also skips",
+         %{tmp_dir: dir} do
+      assert {:ok, %{mcp: :skipped}} = Workspace.prepare(dir, graph_cmd: never_called())
+      refute File.exists?(Path.join(dir, ".mcp.json"))
+    end
+
+    test "the Claude profile still writes .mcp.json (the surface it CAN opt back out of)",
+         %{tmp_dir: dir} do
+      assert {:ok, %{mcp: :created}} =
+               Workspace.prepare(dir, claude_opts(graph_cmd: never_called()))
+
+      assert File.exists?(Path.join(dir, ".mcp.json"))
     end
   end
 
@@ -153,7 +212,7 @@ defmodule Kazi.WorkspaceTest do
       # the default is a genuine System.cmd call, not an injected stub returning ok.
       seed_graph(dir)
 
-      assert {:ok, %{mcp: :created, graph: graph}} = Workspace.prepare(dir)
+      assert {:ok, %{mcp: :created, graph: graph}} = Workspace.prepare(dir, claude_opts())
       assert graph in [:fresh, :updated, :error]
     end
   end
@@ -177,6 +236,15 @@ defmodule Kazi.WorkspaceTest do
     end
 
     {seam, log}
+  end
+
+  # Issue #1833: `.mcp.json` injection is gated on the resolved harness profile
+  # (only Claude can opt back out via `--strict-mcp-config`), so every test that
+  # exercises the injection mechanism itself passes a real Claude profile via
+  # `:adapter_opts` rather than relying on a no-profile default.
+  defp claude_opts(opts \\ []) do
+    {:ok, profile} = Registry.fetch(:claude)
+    Keyword.put(opts, :adapter_opts, profile: profile)
   end
 
   # A seam that must never be invoked (used by .mcp.json-only / no-graph tests).

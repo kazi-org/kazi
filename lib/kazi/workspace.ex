@@ -6,11 +6,21 @@ defmodule Kazi.Workspace do
   Three deterministic, idempotent preparations run before the harness is dispatched
   into the workspace:
 
-    1. **Expose the graph MCP.** Ensure the workspace's `.mcp.json` declares the
-       `code-review-graph` MCP server, so the agent's own exploration uses the
-       ~10x-cheaper structural queries instead of grep+read (ADR-0010, the
-       hybrid). The merge is **additive**: any servers already declared (and any
-       other top-level keys) are preserved; writing twice yields the same file.
+    1. **Expose the graph MCP — Claude-profile harnesses only (issue #1833).**
+       Ensure the workspace's `.mcp.json` declares the `code-review-graph` MCP
+       server, so the agent's own exploration uses the ~10x-cheaper structural
+       queries instead of grep+read (ADR-0010, the hybrid). The merge is
+       **additive**: any servers already declared (and any other top-level keys)
+       are preserved; writing twice yields the same file. Gated on
+       `Kazi.Harness.DispatchSurface.surface_supported?/1` — the SAME per-profile
+       check `Kazi.Harness.DispatchSurface.minimal_default/2` uses — because only
+       the Claude profile can pass `--strict-mcp-config`/`--mcp-config` to
+       explicitly opt back OUT of an ambiently-discovered `.mcp.json`. A harness
+       with no such flag (opencode: `.mcp.json` is auto-discovered with no
+       equivalent off-switch, and no startup timeout on the handshake) would
+       otherwise wedge forever trying to connect to a server it never asked for.
+       A harness whose profile does not support the surface (or no `:profile` at
+       all, e.g. a bare test double) skips this step entirely (`mcp: :skipped`).
 
     2. **Keep the graph fresh.** When the workspace already carries a code graph
        (`.code-review-graph/graph.db`), refresh it before dispatch so the MCP
@@ -45,7 +55,9 @@ defmodule Kazi.Workspace do
   `prepare/2` returns `{:ok, summary}` where `summary` records what it did:
 
     * `:mcp` — `:created` (no `.mcp.json` existed) | `:merged` (entry added to an
-      existing file) | `:present` (the entry was already there);
+      existing file) | `:present` (the entry was already there) | `:skipped`
+      (the resolved harness profile does not support the `--strict-mcp-config`/
+      `--mcp-config` opt-out, issue #1833 — `.mcp.json` is left untouched);
     * `:graph` — `:absent` (no graph in the workspace) | `:fresh` (graph present,
       already up to date) | `:updated` (graph present, refreshed).
     * `:orientation` — `:skipped` (no `:orientation` opt supplied) | `:unchanged`
@@ -76,14 +88,15 @@ defmodule Kazi.Workspace do
 
   @typedoc "What `prepare/2` did, per preparation step."
   @type summary :: %{
-          mcp: :created | :merged | :present,
+          mcp: :created | :merged | :present | :skipped,
           graph: :absent | :fresh | :updated | :error,
           orientation: :skipped | :unchanged | :created | :updated | :error
         }
 
   @doc """
   Prepare `workspace` for a harness dispatch: expose the graph MCP in its
-  `.mcp.json` and refresh its code graph if one is present.
+  `.mcp.json` (Claude-profile harnesses only, issue #1833) and refresh its code
+  graph if one is present.
 
   Both steps are idempotent — running `prepare/2` twice over an already-prepared
   workspace leaves the `.mcp.json` byte-identical and re-checks (rather than
@@ -93,6 +106,15 @@ defmodule Kazi.Workspace do
 
     * `:graph_cmd` — the `System.cmd`-shaped seam used to run `code-review-graph`
       for the freshness step (see the moduledoc). Defaults to the real binary.
+    * `:adapter_opts` — the dispatch's adapter opts, specifically `[:profile]`
+      (issue #1833): forwarded to
+      `Kazi.Harness.DispatchSurface.surface_supported?/1`, the SAME per-profile
+      gate `minimal_default/2` uses, to decide whether this harness can opt back
+      OUT of an ambiently-discovered `.mcp.json` via `--strict-mcp-config`. Only
+      the Claude profile can today, so any other profile (or none, e.g. a bare
+      test double) skips writing `.mcp.json` entirely (`mcp: :skipped`) rather
+      than leaving an unremovable ambient MCP server in a workspace the harness
+      has no flag to disable it from.
     * `:orientation` — `{failing, context_opts}` to write the `.kazi/context.md`
       orientation note (T4.4): `failing` is the iteration's failing-predicate
       slice (`Kazi.Context.failing/0`) and `context_opts` is forwarded to
@@ -105,7 +127,7 @@ defmodule Kazi.Workspace do
   """
   @spec prepare(String.t(), keyword()) :: {:ok, summary()} | {:error, term()}
   def prepare(workspace, opts \\ []) when is_binary(workspace) and is_list(opts) do
-    with {:ok, mcp} <- ensure_mcp_server(workspace) do
+    with {:ok, mcp} <- ensure_mcp_server(workspace, Keyword.get(opts, :adapter_opts, [])) do
       {:ok,
        %{
          mcp: mcp,
@@ -122,22 +144,36 @@ defmodule Kazi.Workspace do
   # Read the workspace's .mcp.json (or start an empty config), add the
   # code-review-graph server under "mcpServers" without touching any other
   # servers or top-level keys, and write it back only when it changed.
-  @spec ensure_mcp_server(String.t()) :: {:ok, :created | :merged | :present} | {:error, term()}
-  defp ensure_mcp_server(workspace) do
-    path = Path.join(workspace, @mcp_filename)
+  #
+  # Issue #1833: gated on the SAME per-profile check
+  # `Kazi.Harness.DispatchSurface.minimal_default/2` uses for the opposite
+  # direction (whether to RESTRICT the surface). Here it decides whether to
+  # INJECT at all: only a profile that can pass `--strict-mcp-config` (today,
+  # only Claude) has a way to opt back OUT of an ambiently-discovered
+  # `.mcp.json`, so writing one for any other harness is not an "opt-in
+  # surface" for it — it is an unremovable ambient MCP server. opencode has no
+  # such opt-out AND no startup timeout on the handshake, so it wedges forever.
+  @spec ensure_mcp_server(String.t(), keyword()) ::
+          {:ok, :created | :merged | :present | :skipped} | {:error, term()}
+  defp ensure_mcp_server(workspace, adapter_opts) do
+    if Kazi.Harness.DispatchSurface.surface_supported?(adapter_opts) do
+      path = Path.join(workspace, @mcp_filename)
 
-    with {:ok, existed?, config} <- read_mcp_config(path) do
-      servers = Map.get(config, "mcpServers", %{})
+      with {:ok, existed?, config} <- read_mcp_config(path) do
+        servers = Map.get(config, "mcpServers", %{})
 
-      if Map.get(servers, @server_key) == @server_entry do
-        {:ok, :present}
-      else
-        merged = Map.put(config, "mcpServers", Map.put(servers, @server_key, @server_entry))
+        if Map.get(servers, @server_key) == @server_entry do
+          {:ok, :present}
+        else
+          merged = Map.put(config, "mcpServers", Map.put(servers, @server_key, @server_entry))
 
-        with :ok <- write_mcp_config(path, merged) do
-          {:ok, if(existed?, do: :merged, else: :created)}
+          with :ok <- write_mcp_config(path, merged) do
+            {:ok, if(existed?, do: :merged, else: :created)}
+          end
         end
       end
+    else
+      {:ok, :skipped}
     end
   end
 
