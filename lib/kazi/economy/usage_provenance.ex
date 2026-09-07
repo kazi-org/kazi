@@ -77,6 +77,10 @@ defmodule Kazi.Economy.UsageProvenance do
         Enum.frequencies_by(snapshots, fn p ->
           if is_map(p), do: p["usage_coverage"] || "unknown", else: "unknown"
         end),
+      "runs_by_cost_coverage" =>
+        Enum.frequencies_by(snapshots, fn p ->
+          if is_map(p), do: p["cost_coverage"] || "unknown", else: "unknown"
+        end),
       "known_reported_cost_usd" => sum_known(known, "reported_cost_usd"),
       "known_estimated_cost_usd" => sum_known(known, "estimated_cost_usd"),
       "actual_cost_usd" => nil

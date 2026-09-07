@@ -3851,6 +3851,7 @@ defmodule Kazi.Loop do
         "[seal] enabled = false."
     end)
 
+    if data.iterations > 0, do: notify_iteration(data, true)
     terminate_with(:tampered, %Data{data | tampered_file: info})
   end
 
@@ -3869,6 +3870,7 @@ defmodule Kazi.Loop do
         ":rendered_node_drift (the run is VOID, never converged)."
     end)
 
+    if data.iterations > 0, do: notify_iteration(data, true)
     terminate_with(:rendered_node_drift, %Data{data | drifted_node: info})
   end
 
@@ -4512,9 +4514,13 @@ defmodule Kazi.Loop do
   # it observes the freshly-built vector and reports whether the WHOLE vector is
   # satisfied — it cannot influence `decide`, and a nil/raising callback is
   # contained so persistence trouble never stalls or alters convergence.
-  defp notify_iteration(%Data{on_iteration: nil}), do: :ok
+  # A terminal refusal retains the last observation, with final accounting,
+  # without claiming a fresh observation or a budget-stop action.
+  defp notify_iteration(data, refused? \\ false)
+  defp notify_iteration(%Data{on_iteration: nil}, _refused?), do: :ok
 
-  defp notify_iteration(%Data{on_iteration: callback} = data) when is_function(callback, 1) do
+  defp notify_iteration(%Data{on_iteration: callback} = data, refused?)
+       when is_function(callback, 1) do
     payload = %{
       goal: data.goal,
       # 0-based per-goal index matching the read-model's iteration_index column.
@@ -4523,7 +4529,7 @@ defmodule Kazi.Loop do
       # Reuse the SAME test `decide/2` uses (`all_satisfied?`) rather than
       # calling `PredicateVector.satisfied?/1` directly, so this can never drift
       # from the actual convergence gate (deep review L10).
-      converged?: all_satisfied?(data.vector),
+      converged?: not refused? and all_satisfied?(data.vector),
       # T1.2 regression: the green→red flags for this observation, so the runtime
       # projects them into the read-model (making the regression queryable).
       regressions: data.regressions,
