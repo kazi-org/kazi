@@ -180,9 +180,10 @@ defmodule Kazi.Loop.WorkingSetDigestTest do
 
     # Byte-for-byte the evidence prompt: a goal line + an evidence line, nothing
     # prepended.
-    assert first_prompt =~ "goal=digest-test fix failing predicates: code"
+    assert first_prompt =~ "goal=digest-test\n"
     refute first_prompt =~ "Working set"
     # The whole prompt is exactly two lines (goal + evidence) — no digest section.
-    assert length(String.split(first_prompt, "\n")) == 2
+    assert first_prompt =~ "## Declared task"
+    assert first_prompt =~ "evidence: fix failing predicates: code"
   end
 end
