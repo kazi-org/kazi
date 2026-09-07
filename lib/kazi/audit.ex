@@ -61,13 +61,25 @@ defmodule Kazi.Audit do
     sample_key = Keyword.get(opts, :sample_key, to_string(goal_ref))
 
     if PredicateSensitivity.should_sample?(sample_key, sample_rate) do
-      summary = PredicateSensitivity.audit(baseline, reevaluate)
+      targets = Keyword.get(opts, :targets, PredicateVector.passing(baseline))
 
-      if Keyword.get(opts, :record?, true) do
-        Kazi.ReadModel.record_predicate_audit(goal_ref, summary)
+      case PredicateSensitivity.score(baseline, baseline, targets) do
+        {:error, _} = error ->
+          error
+
+        _ ->
+          summary =
+            case Keyword.fetch(opts, :targets) do
+              {:ok, targets} -> PredicateSensitivity.score(baseline, reevaluate.(), targets)
+              :error -> PredicateSensitivity.audit(baseline, reevaluate)
+            end
+
+          if Keyword.get(opts, :record?, true) do
+            Kazi.ReadModel.record_predicate_audit(goal_ref, summary)
+          end
+
+          {:sampled, summary}
       end
-
-      {:sampled, summary}
     else
       :skipped
     end

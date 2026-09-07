@@ -25,13 +25,14 @@ defmodule Kazi.ReadModel.PredicateAudit do
     field(:survived, :integer)
     field(:sensitivity, :float)
     field(:survivors, :string)
+    field(:coverage, :map)
     field(:sampled_at, :utc_datetime_usec)
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:goal_ref, :tested, :constrained, :survived, :sampled_at]
-  @optional [:sensitivity, :survivors]
+  @optional [:sensitivity, :survivors, :coverage]
 
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(row, attrs) do
