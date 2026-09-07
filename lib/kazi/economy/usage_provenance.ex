@@ -131,7 +131,6 @@ defmodule Kazi.Economy.UsageProvenance do
   end
 
   defp result_map({:ok, result}) when is_map(result), do: result
-  defp result_map({:error, result}) when is_map(result), do: result
   defp result_map(_), do: %{}
   defp fetch(map, key) when is_map(map), do: Map.get(map, key, Map.get(map, to_string(key)))
   defp fetch(_, _), do: nil
