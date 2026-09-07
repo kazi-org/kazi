@@ -465,6 +465,23 @@ defmodule Kazi.ReadModel do
       survived: Map.fetch!(summary, :survived),
       sensitivity: Map.get(summary, :sensitivity),
       survivors: encode_survivors(Map.get(summary, :survivors, [])),
+      coverage:
+        if(Map.has_key?(summary, :eligible),
+          do:
+            Map.take(
+              summary,
+              [
+                :eligible,
+                :detected,
+                :inconclusive,
+                :targets,
+                :detected_ids,
+                :inconclusive_ids,
+                :coverage
+              ]
+            ),
+          else: nil
+        ),
       sampled_at: now,
       inserted_at: now,
       updated_at: now
@@ -475,7 +492,16 @@ defmodule Kazi.ReadModel do
     |> Writer.insert(
       on_conflict:
         {:replace,
-         [:tested, :constrained, :survived, :sensitivity, :survivors, :sampled_at, :updated_at]},
+         [
+           :tested,
+           :constrained,
+           :survived,
+           :sensitivity,
+           :survivors,
+           :coverage,
+           :sampled_at,
+           :updated_at
+         ]},
       conflict_target: :goal_ref,
       returning: true
     )
