@@ -22,8 +22,8 @@ defmodule Kazi.Economy.PriceMapTest do
         reasoning_tokens: 1_000_000
       }
 
-      # 5.00 + 0.50 + 6.25 + 25.00 + 25.00 = 61.75
-      assert PriceMap.cost_usd("claude-opus-4-8", usage) == {:ok, 61.75}
+      # 5.00 + 0.50 + 6.25 + 25.00 = 36.75; reasoning is within output.
+      assert PriceMap.cost_usd("claude-opus-4-8", usage) == {:ok, 36.75}
     end
 
     test "prices claude-sonnet-5 at list rates ($3 input / $15 output)" do
@@ -38,8 +38,8 @@ defmodule Kazi.Economy.PriceMapTest do
         reasoning_tokens: 1_000_000
       }
 
-      # 3.00 + 0.30 + 3.75 + 15.00 + 15.00 = 37.05
-      assert PriceMap.cost_usd("claude-sonnet-5", usage) == {:ok, 37.05}
+      # 3.00 + 0.30 + 3.75 + 15.00 = 22.05; reasoning is within output.
+      assert PriceMap.cost_usd("claude-sonnet-5", usage) == {:ok, 22.05}
     end
 
     test "a realistic split computes a fractional cost (cheap cached reads)" do
@@ -64,8 +64,8 @@ defmodule Kazi.Economy.PriceMapTest do
       end
     end
 
-    test "a token class absent from the envelope contributes nothing (count of zero, not unknown)" do
-      # Only output reported; the other four classes are absent → cost is output-only.
+    test "only known fields contribute to a partial estimate" do
+      # Only output reported; this is an output-only partial estimate.
       assert PriceMap.cost_usd("claude-haiku-4-5", %{output_tokens: 1_000_000}) == {:ok, 5.0}
     end
 
@@ -73,8 +73,9 @@ defmodule Kazi.Economy.PriceMapTest do
       assert PriceMap.cost_usd("claude-sonnet-4-6", %{"input_tokens" => 1_000_000}) == {:ok, 3.0}
     end
 
-    test "an empty envelope for a known model costs nothing (still {:ok, _}, not omitted)" do
-      assert PriceMap.cost_usd("claude-opus-4-8", %{}) == {:ok, 0.0}
+    test "an empty envelope has unknown cost, while explicit zero is known" do
+      assert PriceMap.cost_usd("claude-opus-4-8", %{}) == :error
+      assert PriceMap.cost_usd("claude-opus-4-8", %{output_tokens: 0}) == {:ok, 0.0}
     end
   end
 
@@ -128,16 +129,23 @@ defmodule Kazi.Economy.PriceMapTest do
       end
     end
 
-    test "every renderer token field is priced (no envelope class is silently unpriced)" do
+    test "every disjoint token field is priced; reasoning stays a subset" do
       # The compile-time coupling guard enforces this against `Kazi.CLI.Usage`;
       # assert it at runtime too so the contract is visible in the suite. Pricing
       # 1M tokens of each renderer field (minus the computed `cost_usd`) yields a
       # strictly positive cost — proving each class actually feeds the sum (a
       # single token at a sub-$/M rate would round to zero at 6 dp).
-      for field <- Usage.fields() -- [:cost_usd] do
+      for field <- Usage.fields() -- [:cost_usd, :reasoning_tokens] do
         assert {:ok, cost} = PriceMap.cost_usd("claude-opus-4-8", %{field => 1_000_000})
         assert cost > 0, "#{field} did not contribute to the priced cost"
       end
     end
+  end
+
+  test "reasoning subset is not billed twice" do
+    model = hd(Kazi.Economy.PriceMap.models())
+
+    assert Kazi.Economy.PriceMap.cost_usd(model, %{output_tokens: 100, reasoning_tokens: 50}) ==
+             Kazi.Economy.PriceMap.cost_usd(model, %{output_tokens: 100})
   end
 end
