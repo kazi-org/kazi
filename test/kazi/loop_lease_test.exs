@@ -177,16 +177,11 @@ defmodule Kazi.LoopLeaseTest do
     {:ok, _l2} =
       start_leased_loop(goal_with_flag("g2", flag2), store, "shared", "h2", self(), now_fn)
 
-    # Let them race a few intervals, then inspect who holds the key. Exactly one
-    # holder owns it — they serialized rather than both grabbing it.
-    Process.sleep(60)
-
+    # Wait for the observable dispatch before inspecting the lease. A fixed
+    # sleep can expire after acquisition but before prompt construction finishes.
+    assert_receive :dispatched, 1_000
     assert {:ok, %Lease{holder: holder}} = Memory.peek("shared", lease_opts)
     assert holder in ["h1", "h2"]
-
-    # And only one of them is the dispatcher: the holder dispatches, the other has
-    # deferred (we received at least one :dispatched, and the key is singly held).
-    assert_received :dispatched
   end
 
   test "two loops on DISTINCT keys both acquire (parallel, no contention)" do
