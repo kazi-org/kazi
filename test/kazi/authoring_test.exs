@@ -22,6 +22,65 @@ defmodule Kazi.AuthoringTest do
   alias Kazi.Repo
   alias Kazi.Runtime
 
+  describe "proposal protection contract" do
+    test "preserves held-out predicates, seals and complete enforcement through reload" do
+      payload = %{
+        "predicates" => [
+          %{
+            "id" => "hidden",
+            "provider" => "custom_script",
+            "held_out" => true,
+            "config" => %{"cmd" => "true"}
+          }
+        ],
+        "seal" => %{"sealed_inputs" => ["checker.sh"], "mutable_inputs" => ["generated/*"]},
+        "enforcement" => %{
+          "enabled" => false,
+          "clean_tree" => false,
+          "read_only_paths" => ["checker.sh"],
+          "guard" => [%{"id" => "count", "metric" => %{"cmd" => "true"}}],
+          "roles" => %{"fixer" => %{"read_only_paths" => ["tests/**"]}}
+        }
+      }
+
+      assert {:ok, goal} = Authoring.parse_proposal(payload, "protected")
+      assert hd(goal.predicates).held_out?
+      assert goal.seal.sealed_inputs == ["checker.sh"]
+      ref = "protection-round-trip"
+      assert {:ok, _} = Authoring.propose("protect checker", proposal: payload, proposal_ref: ref)
+      assert {:ok, _} = Authoring.approve(ref)
+      assert {:ok, loaded} = Authoring.load_approved(ref)
+      assert loaded.seal == goal.seal
+      assert loaded.enforcement == goal.enforcement
+      assert hd(loaded.predicates).held_out?
+    end
+
+    test "rejects malformed protection values" do
+      base = %{
+        "predicates" => [
+          %{"id" => "check", "provider" => "custom_script", "config" => %{"cmd" => "true"}}
+        ]
+      }
+
+      for {key, value} <- [
+            {"seal", false},
+            {"seal", %{"sealed_inputs" => "checker"}},
+            {"enforcement", true},
+            {"enforcement", %{"enabled" => "yes"}}
+          ] do
+        assert {:error, {:invalid_proposal, _}} =
+                 Authoring.parse_proposal(Map.put(base, key, value), "bad")
+      end
+
+      for value <- ["true", 1, nil] do
+        payload =
+          put_in(base, ["predicates"], [Map.put(hd(base["predicates"]), "held_out", value)])
+
+        assert {:error, {:invalid_proposal, _}} = Authoring.parse_proposal(payload, "bad")
+      end
+    end
+  end
+
   # An injectable stub harness (the seam): returns a fixed JSON proposal in the
   # result map's `:result` field — the shape a `claude --output-format json`
   # envelope carries (T4.1). No real claude, no network.
