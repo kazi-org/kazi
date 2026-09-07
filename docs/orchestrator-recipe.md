@@ -673,3 +673,14 @@ Successful admission retains selected baseline verdicts, baseline identity,
 evaluator configuration fingerprint and available evidence references in the
 run record and result. Missing provenance is explicit; a configuration hash
 alone does not certify verifier content or behavioral correctness.
+
+### Run a declared mutation offline
+
+`Kazi.Audit.run_fault(repo, candidate_ref, frozen_goal, target_ids, patch,
+timeout_ms: 30_000)` creates a detached disposable worktree, requires baseline
+checks to pass, applies the supplied Git patch, and evaluates through the real
+providers. Declare verifier files in `seal.sealed_inputs`; a fault that changes
+them is inconclusive. Invalid patches, baseline failures and checker timeouts
+are inconclusive. Cleanup removes the disposable worktree on every return path;
+the caller checkout is never reset or edited. This explicit API is opt-in and
+is not part of the ordinary observation loop.
