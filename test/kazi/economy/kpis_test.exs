@@ -422,4 +422,13 @@ defmodule Kazi.Economy.KPIsTest do
              }
     end
   end
+
+  test "reasoning is already included in output tokens" do
+    result =
+      KPIs.compute(
+        converged_run(%{usage: %{input_tokens: 1, output_tokens: 100, reasoning_tokens: 50}})
+      )
+
+    assert result.tokens == 101
+  end
 end
