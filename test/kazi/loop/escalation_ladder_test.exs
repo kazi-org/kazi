@@ -40,7 +40,10 @@ defmodule Kazi.Loop.EscalationLadderTest do
     @impl true
     def run(prompt, _workspace, opts) do
       model = Keyword.get(opts, :model)
-      goal_id = prompt |> :binary.split("goal=") |> List.last() |> :binary.split(" ") |> hd()
+
+      goal_id =
+        prompt |> :binary.split("goal=") |> List.last() |> String.split(~r/\s+/, parts: 2) |> hd()
+
       Agent.update(Keyword.fetch!(opts, :record_pid), &[{model, goal_id} | &1])
 
       case Keyword.get(opts, :fix_on_model) do

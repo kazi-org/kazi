@@ -11,7 +11,10 @@ defmodule Kazi.Harness.Prompt do
   Claude-specific; the per-harness divergence (argv assembly, stdout parsing)
   lives in the harness profile (`Kazi.Harness.Profile`), not in prompt text.
 
-  Three pieces are public:
+  Four pieces are public:
+
+    * `task_contract/1` — the complete visible goal definition and declared scope,
+      independent of the current failure vector and optional orientation.
 
     * `build_prompt/2` / `build_prompt/3` — the focused dispatch prompt: the work
       item, the failing-predicate evidence, an optional **stable orientation
@@ -32,6 +35,51 @@ defmodule Kazi.Harness.Prompt do
   alias Kazi.PredicateResult
   alias Kazi.Retrieval
   alias Kazi.Retrieval.Snippet
+
+  @doc """
+  Render the declared task as a stable contract. Visible predicates and guards
+  remain present after passing; held-out definitions never reach the harness.
+  Optional orientation and evidence budgets do not truncate this contract.
+  """
+  @spec task_contract(Kazi.Goal.t()) :: String.t()
+  def task_contract(%Kazi.Goal{} = goal) do
+    definitions =
+      goal
+      |> Kazi.Goal.all_predicates()
+      |> Enum.reject(&Kazi.Predicate.held_out?/1)
+      |> Enum.map_join("\n", fn predicate ->
+        "- " <>
+          contract_value(%{
+            id: predicate.id,
+            kind: predicate.kind,
+            description: predicate.description,
+            config: predicate.config,
+            guard: predicate.guard?,
+            acceptance: predicate.acceptance?
+          })
+      end)
+
+    [
+      "goal=#{goal.id}",
+      "## Declared task (preserve all requirements)",
+      "Name: #{goal.name}",
+      "Description: #{goal.description}",
+      "Read paths: " <> contract_value(goal.scope.paths),
+      "Write paths: " <> contract_value(goal.scope.write_paths),
+      "An empty write-path list declares no narrower write scope; retain configured scope enforcement.",
+      "Denied paths: " <> contract_value(goal.scope.deny),
+      "Forbidden paths: " <> contract_value(goal.scope.forbidden_paths),
+      "Forbidden commands: " <> contract_value(goal.scope.forbidden_commands),
+      "No integration: " <> contract_value(goal.scope.no_integration),
+      "Visible acceptance requirements and guards:",
+      definitions
+    ]
+    |> Enum.join("\n")
+    |> Kazi.Redaction.redact()
+  end
+
+  defp contract_value(value),
+    do: inspect(value, limit: :infinity, printable_limit: :infinity, charlists: :as_lists)
 
   # Default byte budget for a single piece of truncated evidence (T4.8). Sized so
   # a head+tail window keeps the failing signal and its resolution legible while

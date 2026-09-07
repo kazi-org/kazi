@@ -146,7 +146,9 @@ defmodule Kazi.Loop.ContextTierTest do
 
       # The orientation prefix is gone — the prompt begins at the evidence body.
       refute prompt =~ "# Orientation"
-      assert String.starts_with?(prompt, "goal=context-tier-test fix failing predicates: code")
+      assert String.starts_with?(prompt, "goal=context-tier-test\n")
+      assert prompt =~ "fix failing predicates: code"
+      assert prompt =~ "## Declared task"
 
       dispatch_event = Enum.find(events, &(&1.iteration == 1))
       assert dispatch_event.context.tier == 0

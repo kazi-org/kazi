@@ -101,12 +101,12 @@ defmodule Kazi.Loop.RetrievalOptInTest do
 
     [prompt] = collect_prompts(1)
 
-    # Byte-for-byte the evidence prompt: a goal line + an evidence line, no
-    # retrieval section appended.
-    assert prompt =~ "goal=retr-test fix failing predicates: code"
+    # The declared task and failing evidence remain, with no retrieval section.
+    assert prompt =~ "goal=retr-test\n"
     refute prompt =~ @retrieval_heading
-    # The whole prompt is exactly two lines (goal + evidence) — nothing appended.
-    assert length(String.split(prompt, "\n")) == 2
+    # Neither task requirements nor failing evidence depend on retrieval.
+    assert prompt =~ "## Declared task"
+    assert prompt =~ "evidence: fix failing predicates: code"
   end
 
   test "ENABLED: a goal-declared retriever injects snippets into the dispatch prompt" do
@@ -123,7 +123,7 @@ defmodule Kazi.Loop.RetrievalOptInTest do
     [prompt] = collect_prompts(1)
 
     # The live failing-evidence is still present (retrieval AUGMENTS, never replaces).
-    assert prompt =~ "goal=retr-test fix failing predicates: code"
+    assert prompt =~ "goal=retr-test\n"
 
     # The retrieved snippets render in the dedicated, clearly-delimited section.
     assert prompt =~ @retrieval_heading
@@ -145,6 +145,7 @@ defmodule Kazi.Loop.RetrievalOptInTest do
     [prompt] = collect_prompts(1)
 
     refute prompt =~ @retrieval_heading
-    assert length(String.split(prompt, "\n")) == 2
+    assert prompt =~ "## Declared task"
+    assert prompt =~ "evidence: fix failing predicates: code"
   end
 end

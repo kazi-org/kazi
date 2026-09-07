@@ -200,7 +200,7 @@ defmodule Kazi.Loop.OrientationPrefixTest do
       assert_received {:dispatched, second}
 
       # Evidence section (the body the prefix sits ahead of) is still there.
-      assert second =~ "goal=orientation-prefix-test fix failing predicates: code"
+      assert second =~ "goal=orientation-prefix-test\n"
       assert second =~ "evidence:"
 
       # The working-set digest distilled from the 1st dispatch's touched set
@@ -245,7 +245,7 @@ defmodule Kazi.Loop.OrientationPrefixTest do
       # The prompt begins exactly at the work-item line — no empty-prefix garbage.
       assert String.starts_with?(
                prompt,
-               "goal=orientation-prefix-test fix failing predicates: code"
+               "goal=orientation-prefix-test\n"
              )
     end
   end
@@ -268,7 +268,7 @@ defmodule Kazi.Loop.OrientationPrefixTest do
       # The prompt begins exactly at the work-item line — the evidence-only body.
       assert String.starts_with?(
                prompt,
-               "goal=orientation-prefix-test fix failing predicates: code"
+               "goal=orientation-prefix-test\n"
              )
     end
 

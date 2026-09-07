@@ -2648,17 +2648,17 @@ defmodule Kazi.Loop do
   defp dispatch_prompt_parts(%Action{params: params}, %Data{goal: goal} = data) do
     failing = Map.get(params, :failing, [])
 
-    # STABLE: the work item — goal id + the failing-predicate ids. Identical across
-    # iterations sharing the same failing set, so it belongs in the cacheable head.
-    work_item =
-      "goal=#{goal.id} fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}"
+    # The declared contract is stable even when a predicate starts passing. A
+    # task brief in that predicate must not disappear from subsequent dispatches.
+    work_item = Prompt.task_contract(goal)
 
     # VOLATILE: the failing evidence, rendered in FULL (the T4.8 cap is the single
     # governing bound) — `evidence_part/3` then either inlines it (capped) as before,
     # or, when a context store is configured AND the artifact is oversized (T35.4),
     # indexes it and returns a compact reference plus a budget-fitted snippet section.
     raw_evidence =
-      inspect(Map.get(params, :evidence, %{}), limit: :infinity, printable_limit: :infinity)
+      "fix failing predicates: #{Enum.map_join(failing, ",", &to_string/1)}\n" <>
+        inspect(Map.get(params, :evidence, %{}), limit: :infinity, printable_limit: :infinity)
 
     {evidence, context_store} = evidence_part(raw_evidence, failing, data)
 
