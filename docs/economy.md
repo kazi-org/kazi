@@ -252,3 +252,37 @@ feature — no `suggested_budget` key, no suggestion text, no comment block.
 
 See [ADR-0058](adr/0058-economy-feedback-loop.md) decision 2 for the full
 rationale.
+
+## Usage and cost provenance
+
+`apply --json` and `status --json` carry an additive `usage_provenance` snapshot.
+Its `scope` is `cumulative_run`: counts include every fixer and demonstrator
+attempt, including failed or unreported attempts. Persisted iteration snapshots
+replace prior values at the same index; consumers must never sum those snapshots.
+The terminal run row preserves the same snapshot for `economy --json`.
+
+`usage_reports` and `cost_reports` use `dispatches` as their denominator.
+`usage_coverage`/`cost_coverage` say whether every attempt supplied a report;
+they do not certify that the reports contain every token field. `field_reports`,
+`usage_fidelities` and `cost_fidelities` retain that distinction. Missing reports
+remain unknown; explicit zero remains known zero. A historical row with no
+snapshot has unknown provenance, rather than retroactively complete coverage.
+
+A numeric legacy `cost_usd` is accompanied by its basis:
+
+- `harness_reported_unverified`: the harness supplied a dollar figure.
+- `price_map_estimate`: Kazi applied its existing dated table to reported tokens;
+  the date and complete/partial token split are retained.
+- `mixed_estimates`: both sources contributed, with separate known reported and
+  estimated sums and basis counts.
+
+`actual_cost_usd` remains null. Neither a harness estimate nor table arithmetic
+is an authenticated settled receipt, and no provider lookup is introduced.
+History groups expose provenance/coverage beside their legacy percentiles;
+unknown historical rows are counted explicitly. Missing receipts are never
+added to an estimate or silently treated as zero spend.
+
+Reasoning is a subset of output in the normalized envelope. It stays visible
+but is not summed or priced a second time. An empty usage split cannot produce
+a zero-dollar estimate. Configured ceilings, cache weights and table prices are
+unchanged; their admission checks still cannot guarantee a settled invoice cap.

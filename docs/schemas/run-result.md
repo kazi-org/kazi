@@ -1063,3 +1063,13 @@ frontier `N+1`'s groups actually `needs` frontier `N`'s members.
 The consumer reads lines until it sees the object **without** an `event` field —
 that is the terminal `apply --json` result documented above, carrying the final
 `status` / `next_action` / `budget_spent` the orchestrator branches on.
+
+## `usage_provenance` — cumulative accounting coverage
+
+The additive schema-version-2 `usage_provenance` object records dispatch/report
+counts, per-field/source/fidelity coverage, and unverified cost basis. It is a
+cumulative run snapshot, never a per-observation delta. `reported_cost_usd` and
+`estimated_cost_usd` retain their separate known amounts; `actual_cost_usd` is
+null. Missing historical snapshots render unknown coverage. `status` exposes
+the retained iteration snapshot and `economy` summarizes retained run snapshots.
+See [economy provenance](../economy.md#usage-and-cost-provenance) for field semantics.
