@@ -828,17 +828,25 @@ defmodule Kazi.Authoring do
          # converge in a worktree. Parsed by the SAME `Kazi.Goal.Loader` parser
          # goal-file loading uses (parity, not a fork); absent -> the mode `:none`
          # default (byte-identical to before); malformed -> a loud invalid-proposal.
-         {:ok, integration} <- parse_proposal_integration(Map.get(map, "integration")) do
+         {:ok, integration} <- parse_proposal_integration(Map.get(map, "integration")),
+         {:ok, seal} <- proposal_setting(Loader.parse_seal(Map.get(map, "seal"))),
+         {:ok, enforcement} <-
+           proposal_setting(Loader.parse_enforcement(Map.get(map, "enforcement"))) do
       {:ok,
        Goal.new(goal_id,
          name: optional_string(Map.get(map, "name")),
          mode: :create,
          predicates: predicates,
          integration: integration,
+         seal: seal,
+         enforcement: enforcement,
          metadata: draft_metadata(Map.get(map, "rationale"))
        )}
     end
   end
+
+  defp proposal_setting({:ok, value}), do: {:ok, value}
+  defp proposal_setting({:error, reason}), do: {:error, {:invalid_proposal, reason}}
 
   # Reuse the goal-file `[integration]` parser, mapping its loud string error into
   # the proposal chain's `{:invalid_proposal, reason}` shape so a bad integration
@@ -947,15 +955,30 @@ defmodule Kazi.Authoring do
   # required (a goal with no predicate is vacuously "done" — ADR-0002); an empty
   # or non-list `predicates`, or a list with no usable entry, is rejected.
   defp build_predicates(list) when is_list(list) and list != [] do
-    predicates = list |> Enum.map(&build_predicate/1) |> Enum.reject(&is_nil/1)
+    with :ok <- validate_held_out(list) do
+      predicates = list |> Enum.map(&build_predicate/1) |> Enum.reject(&is_nil/1)
 
-    case predicates do
-      [] -> {:error, {:invalid_proposal, "no usable predicate in proposal"}}
-      built -> {:ok, built}
+      case predicates do
+        [] -> {:error, {:invalid_proposal, "no usable predicate in proposal"}}
+        built -> {:ok, built}
+      end
     end
   end
 
   defp build_predicates(_), do: {:error, {:invalid_proposal, "proposal has no predicates"}}
+
+  defp validate_held_out(list) do
+    Enum.reduce_while(list, :ok, fn
+      raw, :ok when is_map(raw) ->
+        case Loader.parse_held_out(raw, raw["id"]) do
+          {:ok, _} -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, {:invalid_proposal, reason}}}
+        end
+
+      _, :ok ->
+        {:cont, :ok}
+    end)
+  end
 
   # One predicate from a proposal entry. Requires an id and a known provider; an
   # entry missing either, or naming an unknown provider, is dropped (the surviving
@@ -986,6 +1009,7 @@ defmodule Kazi.Authoring do
         Predicate.new(id, kind,
           description: optional_string(Map.get(raw, "description")),
           guard?: guard?,
+          held_out?: Map.get(raw, "held_out", false),
           acceptance?: boolean_flag(Map.get(raw, "acceptance"), true) and not guard?,
           config: predicate_config(predicate_config_source(raw))
         )
@@ -1093,15 +1117,9 @@ defmodule Kazi.Authoring do
     # here, defaulted to `:none`, and SerialLanding reported `:nothing_to_land`).
     # A `:none`-mode goal omits the key -- byte-identical to the prior serialization.
     |> put_integration(goal.integration)
-    # #1669 (T45.10): round-trip a drafted `[enforcement]` block -- today only
-    # `apply_default_enforcement/2`'s self-hosting default -- so an approved goal
-    # keeps the read-only lease `Kazi.Enforcement.resolve/1` would otherwise only
-    # default `enabled` for. `nil` (no block -- the overwhelmingly common case)
-    # omits the key, byte-identical to before this existed. Serializes the scalar
-    # fields only (`guards`/`roles` are always empty on the synthesized default;
-    # a HAND-edited draft that adds either via `edit/3` will not round-trip them
-    # yet -- a narrower, pre-existing gap, not one this introduces).
+    # Preserve the full grading contract through persistence and edits.
     |> put_enforcement(goal.enforcement)
+    |> put_seal(goal.seal)
   end
 
   # Emit the `[integration]` table only for a landing goal; a `:none` (default)
@@ -1122,6 +1140,9 @@ defmodule Kazi.Authoring do
 
   defp put_integration(map, _integration), do: map
 
+  defp put_seal(map, nil), do: map
+  defp put_seal(map, seal), do: Map.put(map, "seal", stringify_keys(Map.from_struct(seal)))
+
   defp put_enforcement(map, nil), do: map
 
   defp put_enforcement(map, %Enforcement{} = enforcement) do
@@ -1130,7 +1151,15 @@ defmodule Kazi.Authoring do
       "clean_tree" => enforcement.clean_tree,
       "clean_ref" => enforcement.clean_ref,
       "fail_on_skip" => enforcement.fail_on_skip,
-      "read_only_paths" => enforcement.read_only_paths
+      "read_only_paths" => enforcement.read_only_paths,
+      "guard" =>
+        Enum.map(enforcement.guards, fn guard ->
+          guard |> stringify_keys() |> Map.update!("direction", &to_string/1)
+        end),
+      "roles" =>
+        Map.new(enforcement.roles, fn {role, policy} ->
+          {to_string(role), stringify_keys(policy)}
+        end)
     }
 
     Map.put(map, "enforcement", table)
@@ -1156,7 +1185,8 @@ defmodule Kazi.Authoring do
       "provider" => provider_string(predicate.kind),
       "description" => predicate.description,
       "guard" => predicate.guard?,
-      "acceptance" => predicate.acceptance?
+      "acceptance" => predicate.acceptance?,
+      "held_out" => predicate.held_out?
     }
     # T12.2 (ADR-0020): emit the declared group id back to the `[[predicate]]`
     # table only when set, so an ungrouped predicate round-trips byte-stably.
