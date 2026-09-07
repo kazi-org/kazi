@@ -90,6 +90,18 @@ defmodule Kazi.Audit.PredicateSensitivityTest do
     assert %{inconclusive: 1, detected: 0} = PredicateSensitivity.score(baseline, unknown, [:a])
   end
 
+  test "an exit-only compiler failure earns no mutation credit" do
+    baseline = vector(code: :pass)
+
+    mutated =
+      PredicateVector.new(%{
+        code: PredicateResult.fail(%{exit: 1, verdict: "exit_zero", output: "syntax error"})
+      })
+
+    assert %{detected: 0, inconclusive: 1} =
+             PredicateSensitivity.score(baseline, mutated, [:code])
+  end
+
   describe "audit/2" do
     test "scores the injected re-evaluation against the baseline" do
       baseline = vector(a: :pass, b: :pass)
