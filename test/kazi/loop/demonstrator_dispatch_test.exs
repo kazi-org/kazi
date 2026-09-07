@@ -46,10 +46,24 @@ defmodule Kazi.Loop.DemonstratorDispatchTest do
     def run(prompt, _workspace, opts) do
       if String.contains?(prompt, "Demonstrate a capability and pin it") do
         File.write!(Keyword.fetch!(opts, :pin_path), Keyword.fetch!(opts, :pin_json))
-        {:ok, %{output: "minted", cost: %{tokens: 2}}}
+
+        {:ok,
+         %{
+           output: "minted",
+           cost: %{tokens: 2},
+           usage: %{input_tokens: 1, output_tokens: 1},
+           cost_usd: 0.01
+         }}
       else
         File.write!(Keyword.fetch!(opts, :fix_marker), "fixed")
-        {:ok, %{output: "fixed", cost: %{tokens: 2}}}
+
+        {:ok,
+         %{
+           output: "fixed",
+           cost: %{tokens: 2},
+           usage: %{input_tokens: 1, output_tokens: 1},
+           cost_usd: 0.02
+         }}
       end
     end
   end
@@ -230,5 +244,12 @@ defmodule Kazi.Loop.DemonstratorDispatchTest do
     # `runs.dispatch_count`, so this pins the acc's "dispatch_count 2": the
     # demonstrator is NOT free — it counts against the dispatch budget like the fixer.
     assert result.dispatches == 2
+    assert result.usage.input_tokens == 2
+    assert result.usage.output_tokens == 2
+    assert_in_delta result.usage.cost_usd, 0.03, 0.000001
+    assert result.usage_provenance["dispatches"] == 2
+    assert result.usage_provenance["usage_reports"] == 2
+    assert result.usage_provenance["cost_reports"] == 2
+    assert result.usage_provenance["actual_cost_usd"] == nil
   end
 end
