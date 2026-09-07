@@ -942,4 +942,23 @@ defmodule Kazi.AuthoringTest do
       refute "lib/kazi/providers/mutation.ex" in paths
     end
   end
+
+  test "caller-drafted scope rejects malformed permissions instead of dropping them" do
+    for scope <- [
+          [],
+          %{"write_paths" => "src"},
+          %{"no_integration" => "true"},
+          %{"paths" => [12]}
+        ] do
+      payload = %{
+        "scope" => scope,
+        "predicates" => [
+          %{"id" => "code", "provider" => "custom_script", "config" => %{"cmd" => "true"}}
+        ]
+      }
+
+      assert {:error, {:invalid_proposal, _}} =
+               Kazi.Authoring.parse_proposal(payload, "scope-error")
+    end
+  end
 end
