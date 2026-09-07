@@ -166,3 +166,133 @@ for entry in ["file", "proposal"]:
             assert (work / "executed-count").read_text().strip() == "3"
         print(entry, repair, r["status"], "behavioral-red admitted", flush=True)
 print("PASS: 4 isolated release acceptance scenarios", flush=True)
+
+# The task definition must survive the public caller-drafted proposal boundary.
+worker.write_text(
+    "#!/bin/sh\nset -eu\n"
+    'n=$(cat count 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > count\n'
+    'printf "%s" "$2" > "prompt.$n"\ntouch first\n'
+    'if test "$n" -ge 2; then touch done; fi\nprintf \'{"result":"repair"}\\n\'\n'
+)
+for entry in ["file", "proposal"]:
+    for described in [True, False]:
+        work = root / f"contract-{entry}-{described}"
+        work.mkdir()
+        subprocess.run(["git", "init", "-q", str(work)], check=True)
+        (work / "guard").write_text("kept\n")
+        brief = (
+            "BRIEF_START " + "required detail " * 2000 + " BRIEF_END"
+            if described
+            else None
+        )
+        predicates = [
+            {
+                "id": "brief",
+                "provider": "custom_script",
+                "description": brief,
+                "cmd": "sh",
+                "args": ["-c", "test -f first"],
+                "verdict": "exit_zero",
+            },
+            {
+                "id": "code",
+                "provider": "custom_script",
+                "description": "CODE_SENTINEL test/widget_test.exs",
+                "cmd": "sh",
+                "args": ["-c", "test -f done"],
+                "verdict": "exit_zero",
+            },
+            {
+                "id": "guard",
+                "provider": "custom_script",
+                "guard": True,
+                "description": "GUARD_SENTINEL",
+                "cmd": "sh",
+                "args": ["-c", "test -f guard"],
+                "verdict": "exit_zero",
+            },
+            {
+                "id": "hidden",
+                "provider": "custom_script",
+                "held_out": True,
+                "description": "HIDDEN_SENTINEL",
+                "cmd": "sh",
+                "args": ["-c", "true"],
+                "verdict": "exit_zero",
+            },
+        ]
+        payload = {
+            "goal_id": f"contract-{entry}-{described}",
+            "name": "PUBLIC_NAME_SENTINEL",
+            "description": "PUBLIC_DESCRIPTION_SENTINEL",
+            "scope": {
+                "paths": ["reference.txt"],
+                "write_paths": ["app.sh"],
+                "no_integration": True,
+            },
+            "budget": {"max_total_dispatches": 2},
+            "enforcement": {"enabled": False},
+            "predicates": predicates,
+        }
+        if entry == "proposal":
+            ref = cli(["plan", "--json", "--predicates", json.dumps(payload)])[
+                "proposal_ref"
+            ]
+            cli(["approve", ref, "--json"])
+        else:
+            goal = work / "goal.toml"
+            header = 'id="contract-file"\nname="PUBLIC_NAME_SENTINEL"\ndescription="PUBLIC_DESCRIPTION_SENTINEL"\nmode="create"\n[scope]\npaths=["reference.txt"]\nwrite_paths=["app.sh"]\nno_integration=true\n[budget]\nmax_total_dispatches=2\n[enforcement]\nenabled=false\n'
+            goal.write_text(
+                header
+                + "".join(
+                    "\n[[predicate]]\n"
+                    + "\n".join(
+                        f"{key} = {json.dumps(value)}"
+                        for key, value in predicate.items()
+                        if value is not None
+                    )
+                    + "\n"
+                    for predicate in predicates
+                )
+            )
+            ref = str(goal)
+        result = cli(
+            [
+                "apply",
+                ref,
+                "--workspace",
+                str(work),
+                "--in-place",
+                "--allow-primary-workspace",
+                "--harness",
+                "claude",
+                "--json",
+            ]
+        )
+        assert result["status"] == "converged", result
+        assert (work / "count").read_text().strip() == "2"
+        for n in [1, 2]:
+            prompt = (work / f"prompt.{n}").read_text()
+            for text in [
+                "PUBLIC_NAME_SENTINEL",
+                "PUBLIC_DESCRIPTION_SENTINEL",
+                "CODE_SENTINEL",
+                "test/widget_test.exs",
+                "GUARD_SENTINEL",
+                "test -f first",
+                "test -f done",
+                'Read paths: ["reference.txt"]',
+                'Write paths: ["app.sh"]',
+            ]:
+                assert text in prompt, (entry, described, n, text)
+            assert "HIDDEN_SENTINEL" not in prompt
+            if brief:
+                assert brief in prompt
+            else:
+                assert "BRIEF_START" not in prompt
+            if n == 2:
+                assert "fix failing predicates: code" in prompt
+        print(
+            entry, described, "complete contract retained over 2 launches", flush=True
+        )
+print("PASS: 4 isolated release dispatch-contract scenarios", flush=True)
