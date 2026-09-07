@@ -335,6 +335,7 @@ defmodule Kazi.Runtime do
   """
   @spec run(Goal.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def run(%Goal{} = goal, opts \\ []) do
+    run_id = Keyword.get(opts, :run_id, Ecto.UUID.generate())
     workspace = Keyword.get(opts, :workspace) || goal.scope.workspace
     await_timeout = Keyword.get(opts, :await_timeout, :infinity)
     startup_timeout_ms = resolve_startup_timeout_ms(opts)
@@ -428,7 +429,6 @@ defmodule Kazi.Runtime do
       # T46.1 (ADR-0057): the fleet run registry's identity for this process —
       # generated fresh unless the caller reclaims a prior id (a restarted
       # process resuming its own registry row).
-      run_id = Keyword.get(opts, :run_id, Ecto.UUID.generate())
       persist? = Keyword.get(opts, :persist?, true)
       goal_ref = Keyword.get(opts, :goal_ref, goal.id)
 
@@ -652,6 +652,30 @@ defmodule Kazi.Runtime do
           finish_run(persist?, run_id, {:error, reason})
           error
       end
+    else
+      {:error, {:qualification_failed, evidence}} ->
+        persist? = Keyword.get(opts, :persist?, true)
+
+        register_run(
+          persist?,
+          run_id,
+          workspace,
+          Keyword.get(opts, :goal_ref, goal.id),
+          [],
+          nil,
+          nil,
+          goal,
+          Keyword.get(opts, :session_name),
+          Keyword.get(opts, :proposal_ref),
+          nil
+        )
+
+        if persist?, do: Kazi.ReadModel.RunRegistry.record_qualification(run_id, evidence)
+        finish_run(persist?, run_id, {:error, {:qualification_failed, evidence}})
+        {:error, {:qualification_failed, Map.put(evidence, "run_id", run_id)}}
+
+      error ->
+        error
     end
   end
 

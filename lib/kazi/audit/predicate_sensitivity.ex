@@ -22,7 +22,12 @@ defmodule Kazi.Audit.PredicateSensitivity do
     if invalid != [] do
       {:error, {:invalid_baseline, invalid}}
     else
-      detected_ids = Enum.filter(targets, &(status(mutated, &1) == :fail))
+      detected_ids =
+        Enum.filter(
+          targets,
+          &Kazi.Audit.BehavioralFailure.supported?(PredicateVector.get(mutated, &1))
+        )
+
       survivors = Enum.filter(targets, &(status(mutated, &1) == :pass))
       inconclusive_ids = targets -- (detected_ids ++ survivors)
       eligible = length(targets)
