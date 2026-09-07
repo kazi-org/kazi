@@ -79,6 +79,18 @@ defmodule Kazi.Audit.WorkspaceTest do
     assert git(c.repo, ["worktree", "list", "--porcelain"]) == before
   end
 
+  test "timed-out setup process is reaped", c do
+    pid_file = Path.join(System.tmp_dir!(), "audit-setup-#{Ecto.UUID.generate()}.pid")
+    on_exit(fn -> File.rm(pid_file) end)
+    goal = %{c.goal | setup: Kazi.Setup.new(commands: ["echo $$ > #{pid_file}; exec sleep 30"])}
+
+    assert {:inconclusive, _} =
+             Audit.run_fault(c.repo, "HEAD", goal, ["behavior"], c.patch, timeout_ms: 300)
+
+    pid = pid_file |> File.read!() |> String.trim()
+    refute Kazi.Harness.ChildSupervisor.alive?(pid)
+  end
+
   test "unprotected and sabotaged verifiers are inconclusive", c do
     assert {:inconclusive, _} =
              Audit.run_fault(c.repo, "HEAD", %{c.goal | seal: nil}, ["behavior"], c.patch)
