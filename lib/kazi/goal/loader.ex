@@ -731,8 +731,17 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  @doc false
+  def parse_budget(value), do: build_budget(value)
+
   defp build_budget(budget) when is_map(budget) do
-    keys = [:max_iterations, :max_wall_clock_ms, :max_tokens, :max_dispatches]
+    keys = [
+      :max_iterations,
+      :max_wall_clock_ms,
+      :max_tokens,
+      :max_dispatches,
+      :max_total_dispatches
+    ]
 
     Enum.reduce_while(keys, {:ok, []}, fn key, {:ok, acc} ->
       case Map.get(budget, Atom.to_string(key)) do
@@ -1321,6 +1330,9 @@ defmodule Kazi.Goal.Loader do
   # verbatim. `max_rungs` is an optional positive-integer cap. Model ids reuse the
   # same free-string shape `--model`/`[harness] model` accept (no allow-list here).
   @default_ladder ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"]
+
+  @doc false
+  def parse_escalation(value), do: build_escalation(value)
 
   defp build_escalation(nil), do: {:ok, Goal.default_escalation()}
 

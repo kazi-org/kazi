@@ -823,6 +823,9 @@ defmodule Kazi.Authoring do
     with {:ok, decoded} <- decode_proposal(proposal),
          map = unwrap_proposal(decoded),
          {:ok, predicates} <- build_predicates(extract_predicates(map)),
+         {:ok, budget} <- proposal_setting(Loader.parse_budget(Map.get(map, "budget", %{}))),
+         {:ok, escalation} <-
+           proposal_setting(Loader.parse_escalation(Map.get(map, "escalation"))),
          {:ok, qualification} <-
            proposal_setting(Kazi.Qualification.parse(Map.get(map, "qualification"), predicates)),
          {:ok, setup} <- proposal_setting(Loader.parse_setup(Map.get(map, "setup"))),
@@ -842,6 +845,8 @@ defmodule Kazi.Authoring do
          predicates: predicates,
          integration: integration,
          seal: seal,
+         budget: budget,
+         escalation: escalation,
          qualification: qualification,
          setup: setup,
          enforcement: enforcement,
@@ -1125,6 +1130,24 @@ defmodule Kazi.Authoring do
     # Preserve the full grading contract through persistence and edits.
     |> put_enforcement(goal.enforcement)
     |> put_seal(goal.seal)
+    |> maybe_put(
+      "budget",
+      goal.budget
+      |> Map.from_struct()
+      |> Enum.reject(fn {_, v} -> is_nil(v) end)
+      |> Map.new()
+      |> stringify_keys()
+    )
+    |> maybe_put(
+      "escalation",
+      if(goal.escalation.ladder != [],
+        do:
+          goal.escalation
+          |> Enum.reject(fn {_, v} -> is_nil(v) end)
+          |> Map.new()
+          |> stringify_keys()
+      )
+    )
     |> maybe_put("qualification", if(goal.qualification, do: stringify_keys(goal.qualification)))
     |> maybe_put("setup", if(goal.setup, do: stringify_keys(Map.from_struct(goal.setup))))
   end

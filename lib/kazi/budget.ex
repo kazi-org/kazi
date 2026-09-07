@@ -40,6 +40,7 @@ defmodule Kazi.Budget do
           max_wall_clock_ms: pos_integer() | nil,
           max_tokens: pos_integer() | nil,
           max_dispatches: pos_integer() | nil,
+          max_total_dispatches: pos_integer() | nil,
           cached_read_weight: float()
         }
 
@@ -47,6 +48,7 @@ defmodule Kazi.Budget do
             max_wall_clock_ms: nil,
             max_tokens: nil,
             max_dispatches: nil,
+            max_total_dispatches: nil,
             cached_read_weight: @default_cached_read_weight
 
   @doc "The default cached-read weight applied when none is configured."
@@ -77,6 +79,7 @@ defmodule Kazi.Budget do
       max_wall_clock_ms: Keyword.get(opts, :max_wall_clock_ms),
       max_tokens: Keyword.get(opts, :max_tokens),
       max_dispatches: Keyword.get(opts, :max_dispatches),
+      max_total_dispatches: Keyword.get(opts, :max_total_dispatches),
       cached_read_weight: Keyword.get(opts, :cached_read_weight, @default_cached_read_weight)
     }
   end

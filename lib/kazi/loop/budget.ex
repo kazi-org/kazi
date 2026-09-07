@@ -86,6 +86,9 @@ defmodule Kazi.Loop.Budget do
   @spec check(Budget.t(), usage()) :: :ok | {:stop, reason()}
   def check(%Budget{} = budget, usage) do
     cond do
+      exceeded?(budget.max_total_dispatches, Map.get(usage, :total_dispatches, 0)) ->
+        {:stop, :max_total_dispatches}
+
       exceeded?(budget.max_iterations, Map.get(usage, :iterations, 0)) ->
         {:stop, :max_iterations}
 
