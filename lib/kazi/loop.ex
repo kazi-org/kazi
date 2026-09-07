@@ -1471,7 +1471,7 @@ defmodule Kazi.Loop do
     # act on — live predicates (deployed, legitimately polled in step 5) and
     # quarantined ones (T1.3, no convergence claim) are excluded — so a loop
     # merely WAITING on a live probe is not mistaken for a stalled agent.
-    if total_dispatches_exhausted?(data) and not PredicateVector.satisfied?(vector) do
+    if total_dispatches_exhausted?(data) and code_failing?(vector, data) do
       terminate_over_budget(:max_total_dispatches, data)
     else
       decide_after_observation(vector, data)
@@ -3955,6 +3955,13 @@ defmodule Kazi.Loop do
   defp budget_check(%Data{budget: nil}), do: :ok
 
   defp budget_check(%Data{budget: budget} = data) do
+    # Exhaustion blocks another worker, while non-worker verification and landing
+    # retain their ordinary iteration/time/token ceilings.
+    budget =
+      if total_dispatches_exhausted?(data),
+        do: %{budget | max_total_dispatches: nil, max_dispatches: nil},
+        else: budget
+
     Budget.check(budget, %{
       iterations: rung_iterations(data),
       elapsed_ms: rung_elapsed_ms(data),

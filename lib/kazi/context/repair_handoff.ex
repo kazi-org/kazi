@@ -100,7 +100,7 @@ defmodule Kazi.Context.RepairHandoff do
       %{
         "kind" => "git",
         "commit" => String.trim(sha),
-        "patch_sha256" => hash(diff <> inspect(files))
+        "patch_sha256" => hash(:erlang.term_to_binary({diff, Enum.sort(files)}, [:deterministic]))
       }
     else
       _ ->

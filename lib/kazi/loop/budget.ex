@@ -30,7 +30,8 @@ defmodule Kazi.Loop.Budget do
   alias Kazi.Budget
 
   @typedoc "The budget dimension that forced the stop."
-  @type reason :: :max_iterations | :wall_clock | :token_budget | :max_dispatches
+  @type reason ::
+          :max_iterations | :wall_clock | :token_budget | :max_dispatches | :max_total_dispatches
 
   @typedoc """
   Current usage fed to `check/2`. Each field is the running total the loop tracks:

@@ -45,6 +45,7 @@ defmodule Kazi.Goal.Loader do
   | `max_wall_clock_ms`  | positive integer | `Budget.max_wall_clock_ms` |
   | `max_tokens`         | positive integer | `Budget.max_tokens`      |
   | `max_dispatches`     | positive integer | `Budget.max_dispatches`  |
+  | `max_total_dispatches` | positive integer | invocation-wide launch allowance |
   | `cached_read_weight` | float `0.0..1.0` | `Budget.cached_read_weight` |
 
   Omitted ceiling dimensions are unbounded (`nil`). `max_dispatches` (T48.6,
@@ -129,6 +130,14 @@ defmodule Kazi.Goal.Loader do
 
   See ADR-0042 and `docs/how-to/enforcement.md`; `kazi schema apply` documents the
   `enforcement` object surfaced in the `--json` run result.
+
+  ### `[qualification]` table (optional)
+
+  `required_red = ["behavior"]` names non-guard acceptance predicates that must
+  show supported explicit behavioral failures after setup, before any worker is
+  launched. Missing/green/error/unknown results and ambiguous exit-only failures
+  do not qualify. An absent block retains legacy admission; check-only runs do
+  not require red. See `docs/orchestrator-recipe.md` for structured command evidence.
 
   ### `[seal]` table (optional, → `Goal.seal`, ADR-0080/#1520)
 

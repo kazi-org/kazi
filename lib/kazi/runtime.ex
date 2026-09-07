@@ -790,7 +790,7 @@ defmodule Kazi.Runtime do
           term(),
           :infinity | pos_integer()
         ) ::
-          :ok | {:error, :vacuous_goal} | {:error, {:startup_deadline_exceeded, pos_integer()}}
+          {:ok, map() | nil} | {:error, term()}
   # The t0 vacuous-goal guard observes the FULL predicate vector — through the
   # same real providers the loop would use — BEFORE the loop starts. T69.2
   # (issue #1683): that observation runs the goal's own commands unbounded in
