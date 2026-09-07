@@ -129,6 +129,25 @@ defmodule Kazi.Loop.TaskBriefPromptTest do
     end
   end
 
+  test "quarantined definitions are excluded while real requirements remain" do
+    goal =
+      Goal.new("quarantine-contract",
+        predicates: [
+          Predicate.new(:flaky, :tests,
+            description: "QUARANTINED_REQUIREMENT",
+            config: %{cmd: "quarantined-command"}
+          ),
+          Predicate.new(:real, :tests, description: "REAL_REQUIREMENT")
+        ]
+      )
+
+    rendered = Kazi.Harness.Prompt.task_contract(goal, MapSet.new([:flaky]))
+    assert rendered =~ "REAL_REQUIREMENT"
+    refute rendered =~ "QUARANTINED_REQUIREMENT"
+    refute rendered =~ "quarantined-command"
+    refute rendered =~ "flaky"
+  end
+
   test "a long mandatory brief is not shortened to an orientation allowance" do
     brief = "BRIEF_START " <> String.duplicate("required detail ", 2_000) <> " BRIEF_END"
 

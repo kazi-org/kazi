@@ -295,11 +295,8 @@ defmodule Kazi.Slice1Test do
       # The real (steady) failure drives an agent dispatch...
       assert_receive {:dispatched, prompt}, 5_000
       # ...and the dispatch's work-list is the REAL failure, never the flake.
-      assert prompt =~ "Visible acceptance requirements and guards:"
-      assert prompt =~ "id: :flaky"
-      [_contract, evidence] = String.split(prompt, "\nevidence:", parts: 2)
-      assert evidence =~ "fix failing predicates: real"
-      refute evidence =~ "flaky"
+      assert prompt =~ "real"
+      refute prompt =~ "flaky"
 
       assert wait_until(fn -> :flaky in Loop.snapshot(loop).quarantine end, 5_000),
              "the alternating predicate was never quarantined as flaky"
