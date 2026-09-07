@@ -5019,6 +5019,7 @@ defmodule Kazi.CLI do
       converged_predicates: converged_predicate_count(Map.get(result, :vector)),
       iteration_count: Map.get(result, :iterations, 0),
       usage: Map.get(result, :usage, %{}),
+      usage_provenance: Map.get(result, :usage_provenance),
       harness: opts[:harness] && to_string(opts[:harness]),
       model: opts[:model] && to_string(opts[:model])
     }
@@ -6126,7 +6127,10 @@ defmodule Kazi.CLI do
         rows -> Map.put(base, :landed, Enum.map(rows, &status_landed_json/1))
       end
 
-    put_captures(base, ref)
+    base
+    |> put_usage(%{usage: iteration.usage || %{}})
+    |> Map.put(:usage_provenance, Kazi.Economy.UsageProvenance.render(iteration.usage_provenance))
+    |> put_captures(ref)
   end
 
   # ADR-0081 (#1521): the run's retained capture evidence, per observe iteration,
@@ -11117,6 +11121,10 @@ defmodule Kazi.CLI do
     }
     |> put_qualification_evidence(result)
     |> put_usage(result)
+    |> Map.put(
+      :usage_provenance,
+      Kazi.Economy.UsageProvenance.render(Map.get(result, :usage_provenance))
+    )
     |> put_usage_fidelity(result)
     |> put_economy(economy)
     |> put_context_store(result)
@@ -12314,6 +12322,7 @@ defmodule Kazi.CLI do
       n_with_usage: group.n_with_usage,
       tokens: group.tokens,
       cost_usd: group.cost_usd,
+      usage_provenance: group.usage_provenance,
       dispatch_count: group.dispatch_count,
       # T49.9: `dispatch_count` above stays the both-roles total; this names who
       # spent it (fixer vs demonstrator). Keys are the iteration `action_kind`s.

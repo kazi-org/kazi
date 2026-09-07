@@ -1338,7 +1338,9 @@ defmodule Kazi.Runtime do
         # read-model (and the E19 arms can attribute outcomes to them). Absent on a
         # pre-T34.3 payload — defaults to the empty map, which records as no-counters.
         context: Map.get(payload, :context, %{}),
-        tools: Map.get(payload, :tools, %{})
+        tools: Map.get(payload, :tools, %{}),
+        usage: Map.get(payload, :usage),
+        usage_provenance: Map.get(payload, :usage_provenance)
       }
       # T3.3d deploy wiring: project the release ref recorded on a successful
       # deploy (T3.3c) into the read-model's `release_ref` column so the shipped
@@ -1414,6 +1416,8 @@ defmodule Kazi.Runtime do
       "release_ref" => iteration.release_ref,
       "context" => iteration.context,
       "tools" => iteration.tools,
+      "usage" => iteration.usage,
+      "usage_provenance" => iteration.usage_provenance,
       "observed_at" => DateTime.to_iso8601(iteration.observed_at)
     }
   end
@@ -1778,6 +1782,8 @@ defmodule Kazi.Runtime do
   defp economics_attrs(%{usage: usage} = result) when map_size(usage) == 0 do
     Map.merge(
       %{
+        usage: usage,
+        usage_provenance: Map.get(result, :usage_provenance),
         budget_tokens: nil,
         budget_cached_input_tokens: nil,
         budget_cost_usd: nil,
@@ -1793,7 +1799,13 @@ defmodule Kazi.Runtime do
   defp economics_attrs(%{usage: usage, tokens_used: tokens_used} = result) do
     Map.merge(
       %{
-        budget_tokens: tokens_used,
+        usage: usage,
+        usage_provenance: Map.get(result, :usage_provenance),
+        budget_tokens:
+          if(get_in(result, [:usage_provenance, "usage_reports"]) == 0,
+            do: nil,
+            else: tokens_used
+          ),
         budget_cached_input_tokens: Map.get(usage, :cached_input_tokens),
         budget_cost_usd: Map.get(usage, :cost_usd),
         dispatch_count: Map.get(result, :dispatches, 0),

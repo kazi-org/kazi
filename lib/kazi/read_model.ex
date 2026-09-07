@@ -106,6 +106,8 @@ defmodule Kazi.ReadModel do
       # JSON-safe (string keys; values are already strings/integers). Absent ⇒ %{}.
       context: serialize_counters(Map.get(attrs, :context, %{})),
       tools: serialize_counters(Map.get(attrs, :tools, %{})),
+      usage: Map.get(attrs, :usage),
+      usage_provenance: Map.get(attrs, :usage_provenance),
       observed_at: observed_at
     }
 
@@ -136,6 +138,8 @@ defmodule Kazi.ReadModel do
   # mutable columns so the final state lands idempotently. Normal records omit the
   # flag and keep the duplicate-rejecting contract.
   @upsert_replace_columns [
+    :usage,
+    :usage_provenance,
     :predicate_vector,
     :converged,
     :action_kind,

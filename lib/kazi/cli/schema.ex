@@ -88,6 +88,12 @@ defmodule Kazi.CLI.Schema do
               "Additive, so schema_version stays 2 (same rule as the ADR-0041 predicate envelope)."
         },
         %{
+          name: "usage_provenance",
+          type: "object",
+          description:
+            "Additive cumulative run snapshot: dispatch/report counts, usage source and field coverage, unverified reported cost versus price-map estimate, and actual_cost_usd null. Historical missing snapshots remain unknown. Reasoning tokens are an output subset, not another summed class."
+        },
+        %{
           name: "economy",
           type: "object",
           description:
