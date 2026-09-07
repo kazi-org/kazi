@@ -27,6 +27,10 @@ defmodule Kazi.Audit do
   alias Kazi.Audit.PredicateSensitivity
   alias Kazi.PredicateVector
 
+  @doc "Run one declared fault against a disposable candidate with a frozen verifier."
+  def run_fault(repo, candidate_ref, verifier, targets, patch, opts \\ []),
+    do: Kazi.Audit.Workspace.run(repo, candidate_ref, verifier, targets, patch, opts)
+
   @default_sample_rate 1.0
 
   @typedoc """
