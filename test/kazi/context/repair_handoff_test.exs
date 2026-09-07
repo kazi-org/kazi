@@ -32,7 +32,9 @@ defmodule Kazi.Context.RepairHandoffTest do
           "--allow-empty",
           "-qm",
           "base"
-        ], cd: root)
+        ],
+        cd: root
+      )
 
     for n <- 1..70,
         do:
