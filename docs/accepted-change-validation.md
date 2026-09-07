@@ -75,3 +75,16 @@ provenance, so E76.2–E76.4 remain incomplete. No existing fix was rebuilt.
 E77 preregistration remains dependency-gated. No new paid comparison was run,
 no proposed budget was treated as spending authorization, and no productivity
 claim or default-policy change follows from these implementation checks.
+
+## Distributed verification: v1.296.0
+
+On 2026-09-07, the downloaded `kazi_macos_aarch64` release asset from v1.296.0
+passed all eight public acceptance/bounded-repair scenarios. Its SHA-256 was
+verified against the published checksum:
+`5d49a7a990e755b87c1ac06c0e34fa8f721129da5d621645715312205cdb1e3d`.
+It reports version `1.296.0`, schema 2. Both entry paths converge on the
+second-launch repair, stop at exactly two failed launches, retain readable
+hash-verified handoffs, admit the real behavioral-red fixture and reject the
+blanket-success repair. The existing active executable was not replaced.
+This closes the previously open E78/E79 distributed checks; it does not close
+E74/E76 or authorize E77 paid runs.

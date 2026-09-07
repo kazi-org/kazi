@@ -725,3 +725,9 @@ of returning a successful audit with stranded workspace state.
 For isolated installed-CLI verification, `KAZI_DB` selects the read-model file
 and `KAZI_SINKS_DIR` selects the transcript, event and repair-artifact directory.
 Set both to temporary locations when running offline release fixtures.
+
+Caller-drafted proposals preserve the goal-level `description` and the full
+`scope` table through approval and application, using the same scope validation
+as goal files. Read paths and write paths remain distinct. The stable dispatch
+contract retains passing requirements and guards independently of optional
+orientation size; held-out definitions remain excluded from the worker prompt.
