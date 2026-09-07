@@ -13,7 +13,7 @@ defmodule Kazi.Harness.Prompt do
 
   Four pieces are public:
 
-    * `task_contract/1` — the complete visible goal definition and declared scope,
+    * `task_contract/2` — the visible, non-quarantined goal definition and scope,
       independent of the current failure vector and optional orientation.
 
     * `build_prompt/2` / `build_prompt/3` — the focused dispatch prompt: the work
@@ -38,15 +38,16 @@ defmodule Kazi.Harness.Prompt do
 
   @doc """
   Render the declared task as a stable contract. Visible predicates and guards
-  remain present after passing; held-out definitions never reach the harness.
+  remain present after passing; held-out and quarantined definitions never reach
+  the harness. The contract changes if quarantine membership changes.
   Optional orientation and evidence budgets do not truncate this contract.
   """
-  @spec task_contract(Kazi.Goal.t()) :: String.t()
-  def task_contract(%Kazi.Goal{} = goal) do
+  @spec task_contract(Kazi.Goal.t(), MapSet.t()) :: String.t()
+  def task_contract(%Kazi.Goal{} = goal, quarantine \\ MapSet.new()) do
     definitions =
       goal
       |> Kazi.Goal.all_predicates()
-      |> Enum.reject(&Kazi.Predicate.held_out?/1)
+      |> Enum.reject(&(Kazi.Predicate.held_out?(&1) or MapSet.member?(quarantine, &1.id)))
       |> Enum.map_join("\n", fn predicate ->
         "- " <>
           contract_value(%{

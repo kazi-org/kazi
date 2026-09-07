@@ -2650,7 +2650,7 @@ defmodule Kazi.Loop do
 
     # The declared contract is stable even when a predicate starts passing. A
     # task brief in that predicate must not disappear from subsequent dispatches.
-    work_item = Prompt.task_contract(goal)
+    work_item = Prompt.task_contract(goal, data.quarantine)
 
     # VOLATILE: the failing evidence, rendered in FULL (the T4.8 cap is the single
     # governing bound) — `evidence_part/3` then either inlines it (capped) as before,
