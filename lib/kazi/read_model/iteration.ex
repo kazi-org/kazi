@@ -60,11 +60,16 @@ defmodule Kazi.ReadModel.Iteration do
     field(:tools, :map, default: %{})
     field(:observed_at, :utc_datetime_usec)
 
+    field(:usage, :map)
+    field(:usage_provenance, :map)
+
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:goal_ref, :iteration_index, :predicate_vector, :observed_at]
   @optional [
+    :usage,
+    :usage_provenance,
     :converged,
     :action_kind,
     :action_params,

@@ -532,6 +532,7 @@ defmodule Kazi.Loop do
               # `tokens_used` for back-compat. Appended last so the existing field
               # order is untouched.
               usage: %{},
+              usage_provenance: Kazi.Economy.UsageProvenance.new(),
               # --- T32.4 anti-gaming enforcement (ADR-0042) -------------------
               # The resolved enforcement profile (`Kazi.Enforcement`), or nil =
               # enforcement off (the default — the loop is byte-for-byte unchanged).
@@ -1302,7 +1303,9 @@ defmodule Kazi.Loop do
       context_tier_escalations: Enum.reverse(data.escalation_events),
       # T48.5 (ADR-0058 §4): `:unreported` once a max_tokens ceiling has seen a
       # dispatch report no usage this run (the ceiling cannot bind), else nil.
-      usage_fidelity: data.usage_fidelity
+      usage_fidelity: data.usage_fidelity,
+      usage: data.usage,
+      usage_provenance: data.usage_provenance
     }
 
     {:keep_state_and_data, [{:reply, from, reply}]}
@@ -2401,6 +2404,8 @@ defmodule Kazi.Loop do
     # + dispatch budgets like any other (the economy envelope tags the spend).
     data = accumulate_tokens(data, info[:harness])
     data = accumulate_dispatches(data)
+    data = accumulate_usage(data, info[:harness])
+    data = maybe_flag_unreported_usage(data, info[:harness])
 
     # The code (well, the pin) changed under us: any prior land/deploy is stale.
     data = record_action(data, action, landed?: false, deployed?: false)
@@ -3516,6 +3521,7 @@ defmodule Kazi.Loop do
       tokens_used: data.tokens_used,
       # T34.1 (ADR-0046): the run-aggregate usage envelope (token/cost split).
       usage: data.usage,
+      usage_provenance: data.usage_provenance,
       # T32.4 enforcement: the active anti-gaming guarantees + flagged gaming
       # events, so the CLI's `run --json` can report the bar was held (ADR-0042 §7).
       enforcement: enforcement_status(data),
@@ -3924,6 +3930,8 @@ defmodule Kazi.Loop do
       # the stuck-stop record (which upserts the last observation's row) keeps them.
       context: data.last_context || Counters.empty_context(),
       tools: data.last_tools,
+      usage: data.usage,
+      usage_provenance: data.usage_provenance,
       harness_session_id: data.last_session_id,
       harness_pid: data.last_harness_pid,
       # T48.11 (ADR-0058 §3): the last dispatch's capped hypothesis list — `[]`
@@ -4132,7 +4140,11 @@ defmodule Kazi.Loop do
   # T34.2 adds the per-profile cached/fresh TOKEN split onto the same envelope.
   @spec accumulate_usage(Data.t(), Kazi.HarnessAdapter.result()) :: Data.t()
   defp accumulate_usage(%Data{} = data, result) do
-    %Data{data | usage: merge_usage(data.usage, usage_components(result))}
+    %Data{
+      data
+      | usage: merge_usage(data.usage, usage_components(result)),
+        usage_provenance: Kazi.Economy.UsageProvenance.record(data.usage_provenance, result)
+    }
   end
 
   # The envelope-shaped usage components a harness result carries, keyed by the
@@ -4526,6 +4538,8 @@ defmodule Kazi.Loop do
       # empty when the harness exposed no tool-use stream (absent ≠ zero).
       context: data.last_context || Counters.empty_context(),
       tools: data.last_tools,
+      usage: data.usage,
+      usage_provenance: data.usage_provenance,
       # The inner harness's session id from the latest dispatch (nil until one
       # reports it), so the runtime records it on the fleet registry row.
       harness_session_id: data.last_session_id,
@@ -4568,6 +4582,8 @@ defmodule Kazi.Loop do
       # the budget-stop record is attributable too.
       context: data.last_context || Counters.empty_context(),
       tools: data.last_tools,
+      usage: data.usage,
+      usage_provenance: data.usage_provenance,
       harness_session_id: data.last_session_id,
       harness_pid: data.last_harness_pid,
       # T48.11 (ADR-0058 §3): the last dispatch's capped hypothesis list — `[]`

@@ -99,11 +99,16 @@ defmodule Kazi.ReadModel.Run do
     # `--resume-pr`). Nil for a run that neither landed nor resumed a PR.
     field(:pr_ref, :string)
 
+    field(:usage, :map)
+    field(:usage_provenance, :map)
+
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:run_id, :pid, :workspace, :goal_ref, :started_at, :heartbeat_at]
   @optional [
+    :usage,
+    :usage_provenance,
     :harness,
     :model,
     :status,
