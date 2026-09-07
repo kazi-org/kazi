@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.295.2](https://github.com/kazi-org/kazi/compare/v1.295.1...v1.295.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **loop:** exclude quarantined checks from the task contract ([877bdd2](https://github.com/kazi-org/kazi/commit/877bdd256b8ba6c43fe59136b7d80c8b3d6e6149))
+* **loop:** retain the declared task across dispatches ([430b2fe](https://github.com/kazi-org/kazi/commit/430b2fec486b86b7e83e41775eec2531774d9f5b))
+
 ## [1.295.1](https://github.com/kazi-org/kazi/compare/v1.295.0...v1.295.1) (2026-09-07)
 
 
