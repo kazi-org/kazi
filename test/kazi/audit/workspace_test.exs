@@ -7,7 +7,12 @@ defmodule Kazi.Audit.WorkspaceTest do
     git(repo, ["config", "user.email", "test@example.test"])
     git(repo, ["config", "user.name", "Test"])
     File.write!(Path.join(repo, "value"), "good\n")
-    File.write!(Path.join(repo, "check.sh"), "test \"$(cat value)\" = good\n")
+
+    File.write!(
+      Path.join(repo, "check.sh"),
+      ~s|if test "$(cat value)" = good; then echo '{"failures":0}'; else echo '{"failures":1}'; fi\n|
+    )
+
     git(repo, ["add", "."])
     git(repo, ["commit", "-qm", "baseline"])
     File.write!(Path.join(repo, "value"), "bad\n")
@@ -19,7 +24,13 @@ defmodule Kazi.Audit.WorkspaceTest do
         predicates: [
           Predicate.new("behavior", :custom_script,
             acceptance?: true,
-            config: %{cmd: "sh", args: ["check.sh"], verdict: "exit_zero"}
+            config: %{
+              cmd: "sh",
+              args: ["check.sh"],
+              verdict: "json",
+              path: "$.failures",
+              pass_when: "== 0"
+            }
           )
         ],
         seal: Seal.new(sealed_inputs: ["check.sh"])
@@ -66,6 +77,23 @@ defmodule Kazi.Audit.WorkspaceTest do
              Audit.run_fault(c.repo, "HEAD", goal, ["behavior"], c.patch, timeout_ms: 100)
 
     assert git(c.repo, ["worktree", "list", "--porcelain"]) == before
+  end
+
+  test "unprotected and sabotaged verifiers are inconclusive", c do
+    assert {:inconclusive, _} =
+             Audit.run_fault(c.repo, "HEAD", %{c.goal | seal: nil}, ["behavior"], c.patch)
+
+    File.write!(Path.join(c.repo, "check.sh"), "exit 1\n")
+    sabotage = git(c.repo, ["diff"])
+    git(c.repo, ["restore", "check.sh"])
+    assert {:inconclusive, _} = Audit.run_fault(c.repo, "HEAD", c.goal, ["behavior"], sabotage)
+
+    for constant <- ["exit 0", "exit 1"] do
+      File.write!(Path.join(c.repo, "check.sh"), constant <> "\n")
+      git(c.repo, ["add", "check.sh"])
+      git(c.repo, ["commit", "-qm", "invalid checker"])
+      assert {:inconclusive, _} = Audit.run_fault(c.repo, "HEAD", c.goal, ["behavior"], c.patch)
+    end
   end
 
   defp git(repo, args) do

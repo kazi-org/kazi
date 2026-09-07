@@ -66,6 +66,30 @@ defmodule Kazi.QualificationTest do
     assert {:error, _} = Qualification.parse(%{"required_red" => ["guard"]}, [guard])
   end
 
+  test "ambiguous process failures are rejected and sealed verifier changes alter fingerprints",
+       %{tmp_dir: work} do
+    p = Predicate.new("behavior", :custom_script, acceptance?: true)
+
+    goal =
+      Goal.new("ambiguous",
+        predicates: [p],
+        qualification: %{required_red: ["behavior"]},
+        seal: Kazi.Seal.new(sealed_inputs: ["check.sh"])
+      )
+
+    vector =
+      Kazi.PredicateVector.new(%{
+        "behavior" => PredicateResult.fail(%{exit: 1, verdict: "exit_zero"})
+      })
+
+    File.write!(Path.join(work, "check.sh"), "original")
+    assert {:error, {:qualification_failed, first}} = Qualification.admit(goal, vector, work)
+    assert first["unsupported_failures"] == ["behavior"]
+    File.write!(Path.join(work, "check.sh"), "changed")
+    assert {:error, {:qualification_failed, second}} = Qualification.admit(goal, vector, work)
+    refute first["evaluator_fingerprint"] == second["evaluator_fingerprint"]
+  end
+
   test "a genuine red baseline dispatches and retains provenance", %{tmp_dir: work} do
     script = Path.join(work, "worker.sh")
     File.write!(script, "#!/bin/sh\ntouch fixed\n")
@@ -74,7 +98,16 @@ defmodule Kazi.QualificationTest do
     predicate =
       Predicate.new("behavior", :custom_script,
         acceptance?: true,
-        config: %{cmd: "sh", args: ["-c", "test -f fixed"], verdict: "exit_zero"}
+        config: %{
+          cmd: "sh",
+          args: [
+            "-c",
+            ~s(if test -f fixed; then echo '{"failures":0}'; else echo '{"failures":1}'; fi)
+          ],
+          verdict: "json",
+          path: "$.failures",
+          pass_when: "== 0"
+        }
       )
 
     goal =

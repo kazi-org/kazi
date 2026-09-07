@@ -11,6 +11,58 @@ defmodule Kazi.CLI.AcceptanceIntegrityTest do
     {:ok, work: work}
   end
 
+  test "constant and unrunnable verifiers launch no worker and retain refusal evidence", %{
+    work: root
+  } do
+    for checker <- ["exit 0", "exit 1", "missing-child-command"] do
+      work = Path.join(root, Ecto.UUID.generate())
+      File.mkdir_p!(work)
+      File.write!(Path.join(work, "check.sh"), checker <> "\n")
+
+      payload = %{
+        "goal_id" => Ecto.UUID.generate(),
+        "predicates" => [
+          %{
+            "id" => "behavior",
+            "provider" => "custom_script",
+            "config" => %{
+              "cmd" => "sh",
+              "args" => ["check.sh"],
+              "verdict" => "json",
+              "path" => "$.failures",
+              "pass_when" => "== 0"
+            }
+          }
+        ],
+        "qualification" => %{"required_red" => ["behavior"]},
+        "enforcement" => %{"enabled" => false}
+      }
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["plan", "--json", "--predicates", Jason.encode!(payload)]) == 0
+        end)
+
+      ref = Jason.decode!(String.trim(out))["proposal_ref"]
+      capture_io(fn -> assert Kazi.CLI.run(["approve", ref, "--json"]) == 0 end)
+      worker = Path.join(work, "worker.sh")
+      File.write!(worker, "#!/bin/sh\ntouch launched\n")
+      File.chmod!(worker, 0o755)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["apply", ref, "--workspace", work, "--json"],
+                   adapter_opts: [command: worker]
+                 ) == 1
+        end)
+
+      assert Jason.decode!(String.trim(out))["status"] == "error"
+      refute File.exists?(Path.join(work, "launched"))
+      row = Kazi.Repo.get_by!(Kazi.ReadModel.Run, goal_ref: payload["goal_id"])
+      assert row.qualification["verdicts"]["behavior"] == "error"
+    end
+  end
+
   test "public proposal and file paths admit real repair and reject blanket success", %{
     work: root
   } do
@@ -21,13 +73,21 @@ defmodule Kazi.CLI.AcceptanceIntegrityTest do
 
       File.write!(Path.join(work, "check.sh"), """
       set -eu
-      test "$(sh app.sh 2)" = 4
-      test "$(sh app.sh 3)" = 6
-      test "$(sh app.sh invalid)" = error
-      echo 3 > executed-count
+      failures=0
+      test "$(sh app.sh 2)" = 4 || failures=$((failures+1))
+      test "$(sh app.sh 3)" = 6 || failures=$((failures+1))
+      test "$(sh app.sh invalid)" = error || failures=$((failures+1))
+      if test "$failures" = 0; then echo 3 > executed-count; fi
+      printf '{"failures":%s}\\n' "$failures"
       """)
 
-      config = %{"cmd" => "sh", "args" => ["check.sh"], "verdict" => "exit_zero"}
+      config = %{
+        "cmd" => "sh",
+        "args" => ["check.sh"],
+        "verdict" => "json",
+        "path" => "$.failures",
+        "pass_when" => "== 0"
+      }
 
       payload = %{
         "goal_id" => "integrity-#{entry}-#{repair}",
@@ -68,7 +128,9 @@ defmodule Kazi.CLI.AcceptanceIntegrityTest do
             acceptance = true
             cmd = "sh"
             args = ["check.sh"]
-            verdict = "exit_zero"
+            verdict = "json"
+            path = "$.failures"
+            pass_when = "== 0"
             """)
 
             path
