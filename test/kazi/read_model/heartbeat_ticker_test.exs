@@ -43,7 +43,7 @@ defmodule Kazi.ReadModel.HeartbeatTickerTest do
       # Update the run (simulating a heartbeat from within the loop)
       {:ok, run2} = RunRegistry.heartbeat(run1.run_id)
 
-      assert run2.heartbeat_at > first_heartbeat
+      assert DateTime.compare(run2.heartbeat_at, first_heartbeat) == :gt
     end
 
     test "a stale run with no terminal status is detected" do
