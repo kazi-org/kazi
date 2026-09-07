@@ -1344,6 +1344,10 @@ defmodule Kazi.Loop do
         # another agent / integrate / deploy — terminating as :over_budget
         # with the exceeded dimension as reason.
         case budget_check(data) do
+          {:stop, :max_total_dispatches} ->
+            # The final allowed attempt still earns a fresh verification.
+            observe_tick(data)
+
           {:stop, reason} ->
             # T45.7 (ADR-0056 decision 5): before terminating :over_budget, try the
             # escalation ladder — a next rung re-dispatches the SAME goal at a
@@ -1457,6 +1461,14 @@ defmodule Kazi.Loop do
     # act on — live predicates (deployed, legitimately polled in step 5) and
     # quarantined ones (T1.3, no convergence claim) are excluded — so a loop
     # merely WAITING on a live probe is not mistaken for a stalled agent.
+    if total_dispatches_exhausted?(data) and not PredicateVector.satisfied?(vector) do
+      terminate_over_budget(:max_total_dispatches, data)
+    else
+      decide_after_observation(vector, data)
+    end
+  end
+
+  defp decide_after_observation(vector, data) do
     case StuckDetector.stuck?(code_history(data), data.stuck_iterations) do
       {:stuck, failing} ->
         # T45.7 (ADR-0056 decision 5): the ORDINARY failing-set stall is the T30.3
@@ -3919,7 +3931,8 @@ defmodule Kazi.Loop do
       iterations: rung_iterations(data),
       elapsed_ms: rung_elapsed_ms(data),
       tokens: rung_tokens(data),
-      dispatches: rung_dispatches(data)
+      dispatches: rung_dispatches(data),
+      total_dispatches: data.dispatches
     })
   end
 
@@ -3955,8 +3968,13 @@ defmodule Kazi.Loop do
   # model choice here — it walks exactly the declared list. `failing` is the T30.3
   # same-failing-predicate-set the rung stalled on, carried for observability.
   @spec maybe_escalate(Data.t(), MapSet.t()) :: {:escalated, Data.t()} | :halt
+  defp total_dispatches_exhausted?(%Data{budget: %{max_total_dispatches: limit}, dispatches: n})
+       when is_integer(limit), do: n >= limit
+
+  defp total_dispatches_exhausted?(_), do: false
+
   defp maybe_escalate(%Data{ladder: ladder} = data, failing) do
-    if Ladder.next?(ladder) do
+    if not total_dispatches_exhausted?(data) and Ladder.next?(ladder) do
       ladder = Ladder.advance(ladder, failing, ladder_spend(data))
       adapter_opts = Keyword.put(data.adapter_opts, :model, Ladder.current_model(ladder))
       data = %Data{data | ladder: ladder, adapter_opts: adapter_opts}
