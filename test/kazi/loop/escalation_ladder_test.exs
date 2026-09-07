@@ -58,6 +58,12 @@ defmodule Kazi.Loop.EscalationLadderTest do
     end
   end
 
+  defmodule LiveAfterDeploy do
+    def evaluate(_, context) do
+      if context.deployed?, do: PredicateResult.pass(), else: PredicateResult.fail()
+    end
+  end
+
   defmodule NoopIntegrate do
     @behaviour Kazi.Action
     @impl true
@@ -71,12 +77,15 @@ defmodule Kazi.Loop.EscalationLadderTest do
   end
 
   defp start_loop(escalation, adapter_extra, opts) do
+    {live?, opts} = Keyword.pop(opts, :live_after_repair, false)
     {:ok, record} = Agent.start_link(fn -> [] end)
     {:ok, fixed} = Agent.start_link(fn -> false end)
 
     goal =
       Goal.new("esc-goal",
-        predicates: [Predicate.new(:code, :tests)],
+        predicates:
+          [Predicate.new(:code, :tests)] ++
+            if(live?, do: [Predicate.new(:live, :http_probe)], else: []),
         escalation: escalation,
         metadata: %{fixed_pid: fixed}
       )
@@ -85,7 +94,7 @@ defmodule Kazi.Loop.EscalationLadderTest do
       Kazi.Loop.start_link(
         [
           goal: goal,
-          providers: %{tests: FlaggableProvider},
+          providers: %{tests: FlaggableProvider, http_probe: LiveAfterDeploy},
           harness: RecordingHarness,
           integrate: NoopIntegrate,
           deploy: NoopDeploy,
@@ -98,6 +107,19 @@ defmodule Kazi.Loop.EscalationLadderTest do
     {:ok, result} = Kazi.Loop.await(loop, 5_000)
     dispatches = record |> Agent.get(& &1) |> Enum.reverse()
     {result, models(dispatches), goal_ids(dispatches)}
+  end
+
+  test "exhausted worker allowance preserves integration and live verification" do
+    {result, _, _} =
+      start_loop(%{ladder: ["one", "two"], max_rungs: nil}, [fix_on_model: "one"],
+        budget: Kazi.Budget.new(max_total_dispatches: 1, max_dispatches: 1),
+        live_after_repair: true
+      )
+
+    assert result.outcome == :converged
+    assert result.dispatches == 1
+    assert :integrate in result.actions
+    assert :deploy in result.actions
   end
 
   test "total allowance survives ladder resets and still verifies the last attempt" do

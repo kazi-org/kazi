@@ -17,6 +17,35 @@ defmodule Kazi.Context.RepairHandoffTest do
     assert handoff["total_dispatches"] == 2
   end
 
+  test "candidate identity includes every untracked file", %{tmp_dir: root} do
+    {_, 0} = System.cmd("git", ["init", "-q"], cd: root)
+
+    {_, 0} =
+      System.cmd(
+        "git",
+        [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.test",
+          "commit",
+          "--allow-empty",
+          "-qm",
+          "base"
+        ], cd: root)
+
+    for n <- 1..70,
+        do:
+          File.write!(
+            Path.join(root, "file-#{String.pad_leading(to_string(n), 3, "0")}"),
+            "before"
+          )
+
+    before = RepairHandoff.identity(root)
+    File.write!(Path.join(root, "file-070"), "after")
+    refute RepairHandoff.identity(root)["patch_sha256"] == before["patch_sha256"]
+  end
+
   test "multibyte evidence fits deterministically and preserves handoff when space permits" do
     input = %{
       failing: [{"code", %{output: String.duplicate("雪", 3000)}}],
