@@ -100,6 +100,28 @@ defmodule Kazi.Loop.EscalationLadderTest do
     {result, models(dispatches), goal_ids(dispatches)}
   end
 
+  test "total allowance survives ladder resets and still verifies the last attempt" do
+    for fix <- [nil, "m-two"] do
+      {result, models, _} =
+        start_loop(
+          %{ladder: ["m-one", "m-two", "m-three"], max_rungs: nil},
+          [fix_on_model: fix],
+          budget: Kazi.Budget.new(max_dispatches: 1, max_total_dispatches: 2),
+          stuck_iterations: 20
+        )
+
+      assert models == ["m-one", "m-two"]
+      assert result.dispatches == 2
+
+      if fix do
+        assert result.outcome == :converged
+      else
+        assert result.outcome == :over_budget
+        assert result.reason == :max_total_dispatches
+      end
+    end
+  end
+
   # The model sequence dispatched, oldest-first, deduped to distinct RUNGS
   # (consecutive same-model dispatches within a rung collapse to one entry).
   defp models(dispatches), do: dispatches |> Enum.map(&elem(&1, 0)) |> Enum.dedup()
