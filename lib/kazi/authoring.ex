@@ -829,6 +829,7 @@ defmodule Kazi.Authoring do
          {:ok, qualification} <-
            proposal_setting(Kazi.Qualification.parse(Map.get(map, "qualification"), predicates)),
          {:ok, setup} <- proposal_setting(Loader.parse_setup(Map.get(map, "setup"))),
+         {:ok, scope} <- proposal_setting(Loader.parse_scope(Map.get(map, "scope", %{}))),
          # T45.11 (#1620): honor an `"integration"` block so the single-goal
          # proposal chain (plan -> approve -> apply) can LAND a PR, not just
          # converge in a worktree. Parsed by the SAME `Kazi.Goal.Loader` parser
@@ -841,6 +842,8 @@ defmodule Kazi.Authoring do
       {:ok,
        Goal.new(goal_id,
          name: optional_string(Map.get(map, "name")),
+         description: optional_string(Map.get(map, "description")),
+         scope: scope,
          mode: :create,
          predicates: predicates,
          integration: integration,
@@ -1126,6 +1129,8 @@ defmodule Kazi.Authoring do
     # actually lands on `kazi apply <proposal-ref>` (before this it was dropped
     # here, defaulted to `:none`, and SerialLanding reported `:nothing_to_land`).
     # A `:none`-mode goal omits the key -- byte-identical to the prior serialization.
+    |> maybe_put("description", goal.description)
+    |> put_scope(goal.scope)
     |> put_integration(goal.integration)
     # Preserve the full grading contract through persistence and edits.
     |> put_enforcement(goal.enforcement)
@@ -1150,6 +1155,21 @@ defmodule Kazi.Authoring do
     )
     |> maybe_put("qualification", if(goal.qualification, do: stringify_keys(goal.qualification)))
     |> maybe_put("setup", if(goal.setup, do: stringify_keys(Map.from_struct(goal.setup))))
+  end
+
+  defp put_scope(map, scope) do
+    if scope == Kazi.Scope.new() do
+      map
+    else
+      table =
+        scope
+        |> Map.from_struct()
+        |> Enum.reject(fn {_, v} -> is_nil(v) end)
+        |> Map.new()
+        |> stringify_keys()
+
+      Map.put(map, "scope", table)
+    end
   end
 
   # Emit the `[integration]` table only for a landing goal; a `:none` (default)
