@@ -684,3 +684,12 @@ them is inconclusive. Invalid patches, baseline failures and checker timeouts
 are inconclusive. Cleanup removes the disposable worktree on every return path;
 the caller checkout is never reset or edited. This explicit API is opt-in and
 is not part of the ordinary observation loop.
+
+### Bound dispatches across escalation
+
+`[budget] max_total_dispatches = 2` sets an opt-in invocation-wide worker launch
+allowance. Failed and timed-out attempts count; observation ticks do not. The
+counter survives model-rung changes. After the final allowed launch, verification
+may still converge; otherwise the run stops with `max_total_dispatches` and no
+new rung is launched. Existing `max_dispatches` remains per-rung. A new apply
+invocation starts a new allowance; this does not bound calls inside a harness.
