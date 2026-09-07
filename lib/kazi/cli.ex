@@ -6961,19 +6961,6 @@ defmodule Kazi.CLI do
     end
   end
 
-  # The listener's stop reason reaches here wrapped by its supervisor, as
-  # `{:shutdown, {:failed_to_start_child, Kazi.Daemon.Listener, reason}}` --
-  # match the wrapped shape AND the bare one, so the message survives a change
-  # in where the check lives.
-  defp socket_path_too_long({:socket_path_too_long, bytes, limit}), do: {bytes, limit}
-
-  defp socket_path_too_long({:shutdown, inner}), do: socket_path_too_long(inner)
-
-  defp socket_path_too_long({:failed_to_start_child, _child, inner}),
-    do: socket_path_too_long(inner)
-
-  defp socket_path_too_long(_other), do: nil
-
   defp execute_daemon("status", [], opts, _inject_opts) do
     sock_path = Kazi.Daemon.Supervisor.default_sock_path()
 
@@ -7095,6 +7082,19 @@ defmodule Kazi.CLI do
 
   defp execute_daemon(sub, _args, opts, _inject_opts),
     do: daemon_error("unknown daemon subcommand #{inspect(sub)}", opts)
+
+  # The listener's stop reason reaches here wrapped by its supervisor, as
+  # `{:shutdown, {:failed_to_start_child, Kazi.Daemon.Listener, reason}}` --
+  # match the wrapped shape AND the bare one, so the message survives a change
+  # in where the check lives.
+  defp socket_path_too_long({:socket_path_too_long, bytes, limit}), do: {bytes, limit}
+
+  defp socket_path_too_long({:shutdown, inner}), do: socket_path_too_long(inner)
+
+  defp socket_path_too_long({:failed_to_start_child, _child, inner}),
+    do: socket_path_too_long(inner)
+
+  defp socket_path_too_long(_other), do: nil
 
   # #1719: `launchctl kickstart -k`, `systemctl restart` and a plain `kill` all
   # deliver SIGTERM, whose DEFAULT BEAM disposition halts the VM without running
@@ -7286,8 +7286,6 @@ defmodule Kazi.CLI do
         ""
     end
   end
-
-  defp killed_suffix(_), do: ""
 
   # T67.6 finding 2: the `kazi daemon status` line for the delivery projection --
   # real pass facts only (workspaces scanned, events written), never fabricated. No
