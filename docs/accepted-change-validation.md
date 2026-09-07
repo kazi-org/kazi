@@ -88,3 +88,44 @@ hash-verified handoffs, admit the real behavioral-red fixture and reject the
 blanket-success repair. The existing active executable was not replaced.
 This closes the previously open E78/E79 distributed checks; it does not close
 E74/E76 or authorize E77 paid runs.
+
+## Dispatch-contract release: v1.296.1
+
+The downloaded macOS arm64 artifact from v1.296.1 passed all 12 offline
+scenarios, including four complete-contract cases across two launches. Its
+SHA-256 is `bebf9516685bbb551e49d47b84c5c714f0f8ef2ecb6d10159c3b46ee5bfd9df9`.
+PR #1844 merged as `3b3eec5e2469a8f6b50224e9a1daebd73222b13b` after
+independent review and 5,047 CI cases passed (234 doctests, 4,813 tests),
+with 124 excluded. This closes the E74 distributed gate and supersedes the
+older pending E74 status above.
+
+Fanisi v0.1.0 also passed its distributed gate: 18 offline ledger checks on
+the downloaded native artifact, four checksummed platform archives, and 90
+race-enabled source cases. Its `docs/e80-release-validation.md` records the
+source, artifact identities and limitations. E78/E79/E80 release gates are
+complete; E76's release gate remains open until its accounting checks run
+against the new artifact.
+
+## Accounting source verification
+
+E76 adds nullable cumulative usage/provenance snapshots to runs and iterations.
+Reports count once per launch, including failed launches and both worker roles;
+missing reports remain in the coverage denominator. JSON consumers distinguish
+unverified harness dollars from dated table estimates and unknown actual cost.
+Historical rows stay unknown. Reasoning is retained as a subset of output and
+is neither summed nor priced twice.
+
+The scoped suite executed 250 passing tests. Deliberately dropping the
+provenance fold caused eight failures; double-recording it caused eight failures.
+Removing the final snapshot on sealed-input and rendered-node refusals caused
+two failures. Restoring the implementation returned the full scoped suite to
+green. These checks exercise public consumers and persistence, not only a
+serializer. Independent review cleared the code after those refusal and
+aggregate-cost-coverage fixes.
+
+The installed smoke now includes four accounting cases: file and proposal
+entry, failed first launch, and reported/unreported second launch. It checks
+1,352,533 or 1,352,633 tokens and unverified $2.017401 across independent
+`apply`, `status`, `economy` processes and retained SQLite rows. Release
+certification requires executing those cases against the produced artifact;
+source tests alone do not close that gate.

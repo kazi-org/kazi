@@ -278,7 +278,8 @@ A numeric legacy `cost_usd` is accompanied by its basis:
 
 `actual_cost_usd` remains null. Neither a harness estimate nor table arithmetic
 is an authenticated settled receipt, and no provider lookup is introduced.
-History groups expose provenance/coverage beside their legacy percentiles;
+History groups expose `runs_by_usage_coverage` and `runs_by_cost_coverage`
+beside cost basis and legacy percentiles;
 unknown historical rows are counted explicitly. Missing receipts are never
 added to an estimate or silently treated as zero spend.
 
