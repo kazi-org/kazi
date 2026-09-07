@@ -39,7 +39,20 @@ Pass an isolated binary path, or an assembled release's `bin/kazi` path followed
 by `--mix-release`. It prepends a fake Claude executable, uses private temporary
 state, performs no paid inference, and asserts schema outcomes, launch counts
 and readable handoff references. The behavior checker executes three assertions.
-Temporary evidence is retained for diagnosis.
+Temporary evidence is retained for diagnosis. The release workflow runs this
+smoke before artifact upload on every supported release target.
+
+The final smoke revision isolates run sinks with `KAZI_SINKS_DIR` (and an
+explicit app configuration for older assembled releases), asserts schema 2 and
+reads/hash-checks both handoff artifacts under the temporary root. All eight
+scenarios passed with those stronger checks. A runtime configuration check
+confirmed the new sink override.
+
+Disposable CI on the rebased implementation passed 5,038 cases (234 doctests,
+4,804 tests), with 124 excluded. A later run exposed an existing heartbeat-test
+struct-order comparison across a minute boundary; the assertion now uses
+`DateTime.compare/2`, and all five heartbeat tests pass. Final CI remains a
+merge gate.
 
 Single-file Burrito packaging failed locally: the host Zig version was
 incompatible, and retrying with the repository-pinned Zig 0.15.2 failed linking
