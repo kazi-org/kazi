@@ -859,10 +859,32 @@ defmodule Kazi.Goal.Loader do
   # (`[[enforcement.guard]]`) carries `id` + an inline `metric` table (passed
   # through to the `:ratchet` provider's own normalization) + optional
   # `direction`/`baseline`/`allowed_regression`. Wrong types fail loudly at load.
+  @doc false
+  def parse_enforcement(value), do: build_enforcement(value)
+
+  @doc false
+  def parse_seal(value), do: build_seal(value)
+
+  @doc false
+  def parse_held_out(raw, id), do: fetch_held_out(raw, id)
+
+  defp protection_keys(map, allowed, block) do
+    case Map.keys(map) -- allowed do
+      [] -> :ok
+      unknown -> {:error, "[#{block}] unknown settings: #{inspect(Enum.sort(unknown))}"}
+    end
+  end
+
   defp build_enforcement(nil), do: {:ok, nil}
 
   defp build_enforcement(enf) when is_map(enf) do
-    with {:ok, enabled} <- enforcement_bool(enf, "enabled", true),
+    with :ok <-
+           protection_keys(
+             enf,
+             ~w(enabled clean_tree clean_ref fail_on_skip read_only_paths guard roles),
+             "enforcement"
+           ),
+         {:ok, enabled} <- enforcement_bool(enf, "enabled", true),
          {:ok, clean_tree} <- enforcement_bool(enf, "clean_tree", true),
          {:ok, clean_ref} <- enforcement_clean_ref(enf),
          {:ok, fail_on_skip} <- enforcement_bool(enf, "fail_on_skip", true),
@@ -893,7 +915,8 @@ defmodule Kazi.Goal.Loader do
   defp build_seal(nil), do: {:ok, nil}
 
   defp build_seal(seal) when is_map(seal) do
-    with {:ok, enabled} <- seal_bool(seal, "enabled", true),
+    with :ok <- protection_keys(seal, ~w(enabled sealed_inputs mutable_inputs), "seal"),
+         {:ok, enabled} <- seal_bool(seal, "enabled", true),
          {:ok, sealed_inputs} <- seal_paths(seal, "sealed_inputs"),
          {:ok, mutable_inputs} <- seal_paths(seal, "mutable_inputs") do
       {:ok,
