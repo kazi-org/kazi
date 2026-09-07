@@ -650,3 +650,14 @@ role policies. Malformed protection values are rejected before dispatch.
 Held-out checks are omitted from the worker prompt; sealed-input edits void
 the run as `tampered`. These mechanisms do not provide OS isolation or prevent
 a worker with shell access from reading workspace files.
+
+### Targeted mutation accounting
+
+`Kazi.Audit.run/3` accepts `targets: [predicate_id]`. Every selected target must
+pass in the baseline. Only an explicit mutated `fail` counts as detected;
+`pass` survives, and missing/error/unknown results are inconclusive. Eligible
+counts reconcile as detected + survived + inconclusive. Empty targets have
+undefined sensitivity. Untargeted guards are excluded. The persisted coverage
+map records target identities and counts; historical rows without it retain
+unknown coverage. The legacy two-vector scorer infers targets and labels that
+coverage explicitly. Fault application must be established before scoring.
