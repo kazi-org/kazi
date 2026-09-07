@@ -176,6 +176,10 @@ jobs:
         shell: bash
         run: .github/scripts/mcp_release_smoke.sh "burrito_out/kazi_${BURRITO_TARGET}"
 
+      - name: Accepted-change public CLI smoke
+        shell: bash
+        run: python3 test/support/accepted_change_release_smoke.py "burrito_out/kazi_${BURRITO_TARGET}"
+
       - name: Generate checksums
         shell: bash
         run: |
@@ -217,7 +221,7 @@ jobs:
         run: |
           set -euo pipefail
           apt-get update
-          apt-get install -y --no-install-recommends git curl ca-certificates xz-utils jq build-essential
+          apt-get install -y --no-install-recommends git curl ca-certificates xz-utils jq build-essential python3
 
           # Zig (arm64 Linux) for the Burrito wrap.
           curl -fsSL --retry 5 --retry-all-errors \
@@ -246,6 +250,7 @@ jobs:
           # stdio. A failure here exits non-zero and BLOCKS the release before the
           # asset upload. jq was installed above.
           .github/scripts/mcp_release_smoke.sh burrito_out/kazi_linux_aarch64
+          python3 test/support/accepted_change_release_smoke.py burrito_out/kazi_linux_aarch64
 
           cd burrito_out
           sha256sum kazi_linux_aarch64 | tee kazi_linux_aarch64.sha256
