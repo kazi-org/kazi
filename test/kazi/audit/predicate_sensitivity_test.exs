@@ -19,10 +19,17 @@ defmodule Kazi.Audit.PredicateSensitivityTest do
       baseline = vector(a: :pass, b: :pass, c: :pass)
       mutated = vector(a: :fail, b: :pass, c: :error)
 
-      assert %{tested: 3, constrained: 2, survived: 1, survivors: [:b], sensitivity: s} =
+      assert %{
+               tested: 3,
+               constrained: 1,
+               inconclusive: 1,
+               survived: 1,
+               survivors: [:b],
+               sensitivity: s
+             } =
                PredicateSensitivity.score(baseline, mutated)
 
-      assert_in_delta s, 2 / 3, 1.0e-9
+      assert_in_delta s, 1 / 3, 1.0e-9
     end
 
     test "only baseline-passing predicates are audited (a red-at-convergence id is ignored)" do
@@ -35,11 +42,11 @@ defmodule Kazi.Audit.PredicateSensitivityTest do
                PredicateSensitivity.score(baseline, mutated)
     end
 
-    test "a predicate ABSENT from the mutated vector counts as constrained (not a survivor)" do
+    test "a predicate ABSENT from the mutated vector is inconclusive" do
       baseline = vector(a: :pass, b: :pass)
       mutated = vector(a: :pass)
 
-      assert %{tested: 2, constrained: 1, survived: 1, survivors: [:a]} =
+      assert %{tested: 2, constrained: 0, inconclusive: 1, survived: 1, survivors: [:a]} =
                PredicateSensitivity.score(baseline, mutated)
     end
 
@@ -66,6 +73,21 @@ defmodule Kazi.Audit.PredicateSensitivityTest do
       assert %{tested: 0, sensitivity: nil, survivors: []} =
                PredicateSensitivity.score(baseline, baseline)
     end
+  end
+
+  test "explicit targets exclude guards and diagnose invalid baseline" do
+    baseline = vector(a: :pass, guard: :pass)
+
+    assert %{eligible: 1, detected: 1, survived: 0, inconclusive: 0} =
+             PredicateSensitivity.score(baseline, vector(a: :fail, guard: :pass), [:a])
+
+    assert %{eligible: 0, sensitivity: nil} = PredicateSensitivity.score(baseline, baseline, [])
+
+    assert {:error, {:invalid_baseline, [:missing]}} =
+             PredicateSensitivity.score(baseline, baseline, [:a, :missing])
+
+    unknown = PredicateVector.new(%{a: PredicateResult.unknown()})
+    assert %{inconclusive: 1, detected: 0} = PredicateSensitivity.score(baseline, unknown, [:a])
   end
 
   describe "audit/2" do

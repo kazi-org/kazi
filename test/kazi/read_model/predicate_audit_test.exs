@@ -79,6 +79,19 @@ defmodule Kazi.ReadModel.PredicateAuditTest do
     assert row.sensitivity == nil
   end
 
+  test "target coverage round trips while historical summaries remain unknown" do
+    baseline = Kazi.PredicateVector.new(%{a: Kazi.PredicateResult.pass()})
+    summary = Kazi.Audit.PredicateSensitivity.score(baseline, Kazi.PredicateVector.new(), [:a])
+    assert {:ok, _} = ReadModel.record_predicate_audit("targeted", summary)
+    row = ReadModel.latest_predicate_audit("targeted")
+    assert row.coverage["eligible"] == 1
+    assert row.coverage["inconclusive"] == 1
+    assert row.coverage["targets"] == ["a"]
+    assert row.constrained == 0
+    assert {:ok, _} = ReadModel.record_predicate_audit("legacy", summary([]))
+    assert ReadModel.latest_predicate_audit("legacy").coverage == nil
+  end
+
   test "an un-audited goal reads back nil" do
     assert ReadModel.latest_predicate_audit("never-audited") == nil
   end
