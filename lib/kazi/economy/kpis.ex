@@ -144,6 +144,7 @@ defmodule Kazi.Economy.KPIs do
       iterations_to_convergence: iterations_to_convergence(status, iterations, iteration_count),
       tokens: tokens,
       cost_usd: cost_usd,
+      usage_provenance: Kazi.Economy.UsageProvenance.render(Map.get(run, :usage_provenance)),
       wall_clock_s: wall_clock_s,
       cost_per_converged_predicate: ratio(cost_usd, converged_predicates),
       wall_clock_per_converged_predicate: ratio(wall_clock_s, converged_predicates),
@@ -236,6 +237,10 @@ defmodule Kazi.Economy.KPIs do
       iterations_to_convergence: get(economy, :iterations_to_convergence),
       tokens: get(economy, :tokens) || token_total(get(result, :usage) || %{}),
       cost_usd: get(economy, :cost_usd) || get(get(result, :usage) || %{}, :cost_usd),
+      usage_provenance:
+        Kazi.Economy.UsageProvenance.render(
+          get(result, :usage_provenance) || get(economy, :usage_provenance)
+        ),
       wall_clock_s: get(economy, :wall_clock_s),
       cost_per_converged_predicate: get(economy, :cost_per_converged_predicate),
       wall_clock_per_converged_predicate: get(economy, :wall_clock_per_converged_predicate),
@@ -287,6 +292,8 @@ defmodule Kazi.Economy.KPIs do
         model: model,
         context_tier: tier,
         runs: n,
+        usage_provenance:
+          Kazi.Economy.UsageProvenance.aggregate(Enum.map(kpis, &Map.get(&1, :usage_provenance))),
         stuck_rate: rate(kpis, &(&1.status == "stuck"), n),
         converged_rate: rate(kpis, &(&1.status == "converged"), n),
         mean_cost_per_converged_predicate: mean(kpis, & &1.cost_per_converged_predicate),
@@ -331,6 +338,7 @@ defmodule Kazi.Economy.KPIs do
       {"iterations_to_convergence", kpis.iterations_to_convergence},
       {"tokens", kpis.tokens},
       {"cost_usd", kpis.cost_usd},
+      {"usage_provenance", Map.get(kpis, :usage_provenance)},
       {"wall_clock_s", kpis.wall_clock_s},
       {"cost_per_converged_predicate", kpis.cost_per_converged_predicate},
       {"wall_clock_per_converged_predicate", kpis.wall_clock_per_converged_predicate},
@@ -413,8 +421,7 @@ defmodule Kazi.Economy.KPIs do
     :input_tokens,
     :cached_input_tokens,
     :cache_write_tokens,
-    :output_tokens,
-    :reasoning_tokens
+    :output_tokens
   ]
 
   @spec token_total(map()) :: non_neg_integer() | nil
