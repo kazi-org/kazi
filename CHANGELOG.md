@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.296.1](https://github.com/kazi-org/kazi/compare/v1.296.0...v1.296.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **authoring:** preserve proposal description and declared scope ([37ca806](https://github.com/kazi-org/kazi/commit/37ca8069fa0fea8ed0a6e7fad23ef687ed158a42))
+
 ## [1.296.0](https://github.com/kazi-org/kazi/compare/v1.295.2...v1.296.0) (2026-09-07)
 
 
