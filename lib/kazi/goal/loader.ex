@@ -785,6 +785,9 @@ defmodule Kazi.Goal.Loader do
     end
   end
 
+  @doc false
+  def parse_scope(value), do: build_scope(value)
+
   defp build_scope(scope) when is_map(scope) do
     with {:ok, workspace} <- optional_string(scope, "workspace", "scope"),
          {:ok, repo} <- optional_string(scope, "repo", "scope"),
