@@ -125,7 +125,22 @@ defmodule Kazi.Harness.ProfileRegistryTest do
       # (issue #857) is dropped too: it is dispatch-identity metadata the adapter
       # adds AFTER parsing (the OS pid of the actual subprocess), not something
       # `Profile.parse/2` (a pure function of stdout) could ever produce.
-      adapter_structured = Map.drop(result, [:output, :exit, :command, :workspace, :harness_pid])
+      # The adapter also labels cost provenance after parsing; verify that
+      # boundary explicitly while retaining exact equality for parsed fields.
+      assert result.cost_basis == :harness_reported_unverified
+      assert result.cost_fidelity == :unverified
+
+      adapter_structured =
+        Map.drop(result, [
+          :output,
+          :exit,
+          :command,
+          :workspace,
+          :harness_pid,
+          :cost_basis,
+          :cost_fidelity
+        ])
+
       # ...must equal what the profile parser extracts from the same raw stdout.
       assert Profile.parse(profile, result.output) == adapter_structured
 

@@ -59,6 +59,21 @@ defmodule Kazi.Economy.UsageProvenanceTest do
     assert Provenance.render(nil)["dispatches"] == nil
   end
 
+  test "history retains cost coverage independently of complete token coverage" do
+    report = {:ok, %{usage: %{input_tokens: 1}, cost_usd: 0.1}}
+    complete = Provenance.new() |> Provenance.record(report) |> Provenance.record(report)
+
+    partial =
+      Provenance.new()
+      |> Provenance.record(report)
+      |> Provenance.record({:ok, %{usage: %{input_tokens: 1}}})
+
+    summary = Provenance.aggregate([complete, partial, nil])
+    assert summary["runs_by_usage_coverage"] == %{"complete" => 2, "unknown" => 1}
+    assert summary["runs_by_cost_coverage"] == %{"complete" => 1, "partial" => 1, "unknown" => 1}
+    assert summary["runs_by_cost_basis"] == %{"harness_reported_unverified" => 2, "unknown" => 1}
+  end
+
   test "persisted string keys preserve counters when recording another report" do
     p =
       Provenance.new()

@@ -143,6 +143,63 @@ defmodule Kazi.CLI.AccountingProvenanceTest do
     end
   end
 
+  test "a sealed-input refusal persists the final worker report without inventing a passing observation",
+       %{root: root} do
+    id = "tamper-accounting-#{Ecto.UUID.generate()}"
+    File.write!(Path.join(root, "check.sh"), "exit 1\n")
+    worker = Path.join(root, "worker.sh")
+
+    File.write!(worker, """
+    #!/bin/sh
+    echo 'exit 0' > check.sh
+    echo '{"usage":{"input_tokens":17},"total_cost_usd":0.25}'
+    """)
+
+    File.chmod!(worker, 0o755)
+    goal = Path.join(root, "goal.toml")
+
+    File.write!(goal, """
+    id = "#{id}"
+    [seal]
+    sealed_inputs = ["check.sh"]
+    [enforcement]
+    enabled = false
+    [[predicate]]
+    id = "code"
+    provider = "custom_script"
+    cmd = "sh"
+    args = ["check.sh"]
+    verdict = "exit_zero"
+    """)
+
+    output =
+      capture_io(fn ->
+        assert Kazi.CLI.run(
+                 ["apply", goal, "--workspace", root, "--model", "fixture-unpriced", "--json"],
+                 adapter_opts: [command: worker],
+                 sinks_dir: Path.join(root, "sinks"),
+                 reobserve_interval_ms: 5,
+                 await_timeout: 15_000
+               ) == 1
+      end)
+
+    result = Jason.decode!(String.trim(output))
+    assert result["status"] == "tampered"
+    p = result["usage_provenance"]
+    assert p["dispatches"] == 1
+    assert p["reported_cost_usd"] == 0.25
+    status = json_cli(["status", id, "--json"])
+    assert status["usage_provenance"] == p
+    assert status["usage"] == result["usage"]
+    row = Kazi.ReadModel.latest_iteration(id)
+    refute row.converged
+    assert row.predicate_vector["code"]["status"] == "fail"
+    refute row.action_kind == "budget_stop"
+    assert Kazi.Repo.get_by!(Run, goal_ref: id).usage_provenance == p
+    [group] = json_cli(["economy", "--goal", id, "--json"])["groups"]
+    assert group["usage_provenance"]["known_reported_cost_usd"] == 0.25
+  end
+
   test "price-map estimates disclose partial coverage and never imply settled spend", %{
     root: root
   } do

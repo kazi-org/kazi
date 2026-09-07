@@ -36,7 +36,14 @@ defmodule Kazi.RenderedNodeDriftTest do
     def run(_prompt, workspace, _opts) do
       File.write!(Path.join(workspace, "fixed.txt"), "done\n")
       File.write!(Path.join([workspace, "pkg", "foo", "AGENTS.md"]), "# hand-edited\n")
-      {:ok, %{output: "ok", touched: ["fixed.txt", "pkg/foo/AGENTS.md"]}}
+
+      {:ok,
+       %{
+         output: "ok",
+         touched: ["fixed.txt", "pkg/foo/AGENTS.md"],
+         usage: %{input_tokens: 19},
+         cost_usd: 0.2
+       }}
     end
   end
 
@@ -64,11 +71,12 @@ defmodule Kazi.RenderedNodeDriftTest do
     {:ok, dir: dir}
   end
 
-  defp start_loop(dir, harness, rendered_node_manifest) do
+  defp start_loop(dir, harness, rendered_node_manifest, observer \\ nil) do
     goal = Goal.new("scoped", predicates: [Predicate.new(:code, :tests)])
 
     Kazi.Loop.start_link(
       goal: goal,
+      on_iteration: observer,
       providers: %{tests: MarkerCodeProvider},
       harness: harness,
       integrate: NoopIntegrate,
@@ -84,10 +92,19 @@ defmodule Kazi.RenderedNodeDriftTest do
        %{dir: dir} do
     agents_path = Path.join([dir, "pkg", "foo", "AGENTS.md"])
     manifest = Freshness.arm([%{agents_path: agents_path}])
-    {:ok, loop} = start_loop(dir, NodeEditingHarness, manifest)
+    parent = self()
+
+    {:ok, loop} =
+      start_loop(dir, NodeEditingHarness, manifest, fn p -> send(parent, {:snapshot, p}) end)
 
     assert {:ok, result} = Kazi.Loop.await(loop, 5_000)
 
+    assert_receive {:snapshot, %{usage_provenance: %{"dispatches" => 0}}}
+    assert_receive {:snapshot, final}
+    assert final.usage_provenance == result.usage_provenance
+    assert final.usage == result.usage
+    assert final.usage_provenance["reported_cost_usd"] == 0.2
+    refute final.converged?
     assert result.outcome == :rendered_node_drift
     refute result.outcome == :converged
     assert result.reason == :rendered_node_drift
