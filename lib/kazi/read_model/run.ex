@@ -81,6 +81,7 @@ defmodule Kazi.ReadModel.Run do
     # The goal's authored display name + one-line description (both optional
     # in the goal-file), captured at registration so the dashboard drill-in
     # can say WHAT is being worked on without reloading the goal.
+    field(:qualification, :map)
     field(:goal_name, :string)
     field(:goal_description, :string)
     # --- TKE.5 (`docs/plans/E-KAZI-ENTRYPOINT.md` §1.2): resume handle /
@@ -125,6 +126,7 @@ defmodule Kazi.ReadModel.Run do
     :context_tier,
     :predicate_count,
     :predicate_kind_histogram,
+    :qualification,
     :goal_name,
     :goal_description,
     :lineage_id,

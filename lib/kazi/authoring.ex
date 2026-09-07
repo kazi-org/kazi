@@ -823,6 +823,9 @@ defmodule Kazi.Authoring do
     with {:ok, decoded} <- decode_proposal(proposal),
          map = unwrap_proposal(decoded),
          {:ok, predicates} <- build_predicates(extract_predicates(map)),
+         {:ok, qualification} <-
+           proposal_setting(Kazi.Qualification.parse(Map.get(map, "qualification"), predicates)),
+         {:ok, setup} <- proposal_setting(Loader.parse_setup(Map.get(map, "setup"))),
          # T45.11 (#1620): honor an `"integration"` block so the single-goal
          # proposal chain (plan -> approve -> apply) can LAND a PR, not just
          # converge in a worktree. Parsed by the SAME `Kazi.Goal.Loader` parser
@@ -839,6 +842,8 @@ defmodule Kazi.Authoring do
          predicates: predicates,
          integration: integration,
          seal: seal,
+         qualification: qualification,
+         setup: setup,
          enforcement: enforcement,
          metadata: draft_metadata(Map.get(map, "rationale"))
        )}
@@ -1120,6 +1125,8 @@ defmodule Kazi.Authoring do
     # Preserve the full grading contract through persistence and edits.
     |> put_enforcement(goal.enforcement)
     |> put_seal(goal.seal)
+    |> maybe_put("qualification", if(goal.qualification, do: stringify_keys(goal.qualification)))
+    |> maybe_put("setup", if(goal.setup, do: stringify_keys(Map.from_struct(goal.setup))))
   end
 
   # Emit the `[integration]` table only for a landing goal; a `:none` (default)

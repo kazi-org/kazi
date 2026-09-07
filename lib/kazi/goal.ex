@@ -217,6 +217,7 @@ defmodule Kazi.Goal do
           conventions: conventions(),
           escalation: escalation(),
           setup: Kazi.Setup.t() | nil,
+          qualification: map() | nil,
           metadata: map()
         }
 
@@ -293,6 +294,7 @@ defmodule Kazi.Goal do
             # (byte-identical to before this feature existed). Appended
             # additively so the existing field order is untouched.
             setup: nil,
+            qualification: nil,
             metadata: %{}
 
   @doc """
@@ -379,6 +381,7 @@ defmodule Kazi.Goal do
       escalation: Keyword.get(opts, :escalation, @default_escalation),
       # T69.12 (ADR-0088, issue #1642): the declared `[setup]` provisioning step.
       setup: Keyword.get(opts, :setup),
+      qualification: Keyword.get(opts, :qualification),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end

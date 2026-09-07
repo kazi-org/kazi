@@ -422,7 +422,7 @@ defmodule Kazi.Runtime do
          # language-appropriate equivalent). A goal with no `[setup]` block is
          # byte-identical to before (`Kazi.Setup.run/3` no-ops on nil/`[]`).
          :ok <- run_setup(goal, workspace, opts),
-         :ok <- guard_not_vacuous(goal, providers, workspace, startup_timeout_ms),
+         {:ok, qualification} <- guard_not_vacuous(goal, providers, workspace, startup_timeout_ms),
          :ok <- guard_no_live_duplicate(goal, opts),
          :ok <- guard_no_workspace_collision(goal, opts, workspace) do
       # T46.1 (ADR-0057): the fleet run registry's identity for this process —
@@ -590,6 +590,10 @@ defmodule Kazi.Runtime do
         Keyword.get(opts, :resume_pr)
       )
 
+      if persist? and qualification do
+        Kazi.ReadModel.RunRegistry.record_qualification(run_id, qualification)
+      end
+
       # T51.5 (ADR-0067 point 1): mirror the run START onto the bus, best-effort.
       # Fire-and-forget by construction -- never blocks or alters the run.
       BusMirror.started(goal_ref, run_id, Keyword.get(opts, :session_name))
@@ -637,6 +641,7 @@ defmodule Kazi.Runtime do
         |> normalize_await()
         |> put_goal_drift(t0_snapshot, Keyword.get(opts, :goal_source))
         |> put_run_id(run_id)
+        |> put_qualification(qualification)
       else
         {:error, reason} = error ->
           # Registration now happens before `Loop.start_link/1` (see the
@@ -772,7 +777,7 @@ defmodule Kazi.Runtime do
   defp guard_not_vacuous(%Goal{} = goal, providers, workspace, startup_timeout_ms) do
     case bounded_t0_observation(goal, providers, workspace, startup_timeout_ms) do
       {:ok, vector} ->
-        if PredicateVector.satisfied?(vector), do: {:error, :vacuous_goal}, else: :ok
+        Kazi.Qualification.admit(goal, vector, workspace)
 
       # The named cause fails the with-chain; the caller reports it loudly and
       # no run record exists yet (registration happens after this guard).
@@ -2023,6 +2028,13 @@ defmodule Kazi.Runtime do
   # registry row (`RunRegistry.record_pr_ref/2`) without re-deriving or
   # re-threading the run_id a second time. `Map.put_new/3` never overwrites a
   # caller-supplied `:run_id` already on the map (none does today).
+  defp put_qualification({:ok, result}, nil), do: {:ok, result}
+
+  defp put_qualification({:ok, result}, evidence),
+    do: {:ok, Map.put(result, :qualification, evidence)}
+
+  defp put_qualification(result, _), do: result
+
   defp put_run_id({:ok, result}, run_id) when is_map(result) do
     {:ok, Map.put_new(result, :run_id, run_id)}
   end

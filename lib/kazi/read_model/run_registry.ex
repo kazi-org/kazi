@@ -103,6 +103,15 @@ defmodule Kazi.ReadModel.RunRegistry do
     end
   end
 
+  def record_qualification(run_id, evidence) do
+    Guard.run("qualification record", fn ->
+      case Repo.get_by(Run, run_id: run_id) do
+        nil -> {:error, :not_found}
+        row -> row |> Run.changeset(%{qualification: evidence}) |> Writer.update()
+      end
+    end)
+  end
+
   @doc """
   Records the inner harness's own session id (e.g. the claude envelope's
   `session_id`) on the run row, so the dashboard can offer an interactive

@@ -11117,6 +11117,7 @@ defmodule Kazi.CLI do
       release_ref: Map.get(result, :release_ref),
       enforcement: enforcement_json(Map.get(result, :enforcement))
     }
+    |> put_qualification_evidence(result)
     |> put_usage(result)
     |> put_usage_fidelity(result)
     |> put_economy(economy)
@@ -11310,6 +11311,11 @@ defmodule Kazi.CLI do
   # `Kazi.Runtime.run/2`); absent ⇒ byte-identical to before this field
   # existed. Never affects `status` — the ORIGINAL bar already governed
   # convergence regardless of what happened to the file on disk.
+  defp put_qualification_evidence(map, %{qualification: evidence}),
+    do: Map.put(map, :qualification, evidence)
+
+  defp put_qualification_evidence(map, _), do: map
+
   defp put_goal_drifted(map, %{goal_drifted: true, goal_drift: diff}) do
     map
     |> Map.put(:goal_drifted, true)
