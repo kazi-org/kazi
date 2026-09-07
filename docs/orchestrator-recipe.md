@@ -705,3 +705,19 @@ is explicitly diagnosed. A patch hash is identity evidence, not semantic progres
 The rendered bundle obeys the existing context byte budget; an impossibly small
 budget reports that the handoff cannot fit. Use the artifact to prepare a fresh
 repair session; a separate apply invocation has its own allowance.
+
+For opted-in qualification and mutation credit, an exit-only command failure is
+ambiguous: build or shell errors can share an assertion's exit code. Use the
+existing `custom_script` JSON verdict with a measured assertion value and a
+successful checker exit; malformed output and unsuccessful checker processes
+remain unsupported. Other providers retain their explicit fail/error contract.
+A compile-behavior target can emit its measured compiler outcome as structured
+evidence. This does not establish that an arbitrarily authored assertion is useful.
+
+Qualification refusals retain their baseline evidence in a failed run record.
+`evaluator_config_fingerprint` identifies the predicate definitions;
+`evaluator_fingerprint` additionally includes sealed input digests, or is null
+when no verifier inputs were sealed. The declared-fault runner currently supports
+custom-script checks with a nonempty seal; other provider sets are inconclusive.
+It supervises checker subprocesses and reports worktree cleanup failures instead
+of returning a successful audit with stranded workspace state.
