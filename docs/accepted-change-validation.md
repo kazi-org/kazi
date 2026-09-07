@@ -1,5 +1,10 @@
 # Accepted-change delivery evidence
 
+The E74/E76/E78/E79 release gates are complete in Kazi v1.297.0. The
+downloaded native artifact passed 16 offline scenarios. Fanisi v0.1.0 completes
+the E80 ledger gate. E77 remains offline preparation; no paid comparison or
+productivity verdict is implied.
+
 Source implementation: [Kazi PR #1842](https://github.com/kazi-org/kazi/pull/1842).
 Ledger implementation: [Fanisi PR #5](https://github.com/kazi-org/fanisi/pull/5),
 merged as `1dd4ca87044b2c984b222875ffb95ab8760aa64a`.
@@ -51,30 +56,26 @@ confirmed the new sink override.
 Disposable CI on the rebased implementation passed 5,038 cases (234 doctests,
 4,804 tests), with 124 excluded. A later run exposed an existing heartbeat-test
 struct-order comparison across a minute boundary; the assertion now uses
-`DateTime.compare/2`, and all five heartbeat tests pass. Final CI remains a
-merge gate.
+`DateTime.compare/2`, and all five heartbeat tests pass. The final merge gate subsequently passed; the distributed checks below record
+the released artifacts.
 
 Single-file Burrito packaging failed locally: the host Zig version was
 incompatible, and retrying with the repository-pinned Zig 0.15.2 failed linking
-macOS system symbols. The assembled release works; the distributed binary is
-not yet certified. No active installation or subscription configuration changed.
+macOS system symbols. At that stage the assembled release worked and the distributed check remained
+open. The released artifacts below subsequently passed their checks. No active
+installation or subscription configuration changed.
 
-## Remaining gates
+## Evaluation gate
 
-E78/E79 release rows remain open until the final merged and distributed artifact
-repeats the smoke. Fanisi's source is merged; its distributed-release check also
-remains open. These facts must not be promoted to release certification.
+E74, E76, E78, E79 and E80 are implemented and have passed their release checks.
+The dated sections below distinguish source, assembled candidate and downloaded
+artifact evidence. Local packaging failure was not treated as a passing release
+check; the distributed gates closed only after the published artifacts ran.
 
-E74's complete-contract implementation and 34 scoped checks are present after
-the rebase. Its planned public `dispatch_contract_test.exs` fixture is absent;
-that public/installed criterion remains unverified. E76's existing source
-selection fix is reused and its adapter/usage tests pass. The public usage
-renderer still exposes numeric cost without the planned cost-basis/source
-provenance, so E76.2–E76.4 remain incomplete. No existing fix was rebuilt.
-
-E77 preregistration remains dependency-gated. No new paid comparison was run,
-no proposed budget was treated as spending authorization, and no productivity
-claim or default-policy change follows from these implementation checks.
+E77 is qualifying candidate task evaluators and its runner offline; final
+freezing remains pending. No new
+paid comparison has run, no proposed budget is spending authorization, and no
+productivity claim or default-policy change follows from implementation checks.
 
 ## Distributed verification: v1.296.0
 
@@ -96,15 +97,13 @@ scenarios, including four complete-contract cases across two launches. Its
 SHA-256 is `bebf9516685bbb551e49d47b84c5c714f0f8ef2ecb6d10159c3b46ee5bfd9df9`.
 PR #1844 merged as `3b3eec5e2469a8f6b50224e9a1daebd73222b13b` after
 independent review and 5,047 CI cases passed (234 doctests, 4,813 tests),
-with 124 excluded. This closes the E74 distributed gate and supersedes the
-older pending E74 status above.
+with 124 excluded. This closes the E74 distributed gate.
 
 Fanisi v0.1.0 also passed its distributed gate: 18 offline ledger checks on
 the downloaded native artifact, four checksummed platform archives, and 90
 race-enabled source cases. Its `docs/e80-release-validation.md` records the
 source, artifact identities and limitations. E78/E79/E80 release gates are
-complete; E76's release gate remains open until its accounting checks run
-against the new artifact.
+complete. E76's final artifact result follows below.
 
 ## Accounting source verification
 
@@ -127,5 +126,26 @@ The installed smoke now includes four accounting cases: file and proposal
 entry, failed first launch, and reported/unreported second launch. It checks
 1,352,533 or 1,352,633 tokens and unverified $2.017401 across independent
 `apply`, `status`, `economy` processes and retained SQLite rows. Release
-certification requires executing those cases against the produced artifact;
-source tests alone do not close that gate.
+certification required executing those cases against the produced artifact;
+that gate is recorded below, separately from source verification.
+
+## Accounting release: v1.297.0
+
+[Kazi PR #1846](https://github.com/kazi-org/kazi/pull/1846) merged as
+`d568b2c6f26635227ea22c8e33d8b3f5c1edc51d` after independent review and
+5,063 passing CI cases (234 doctests, 4,829 tests), with 124 excluded.
+The release source is `0b7c7f916f9c883e1c336c440b539c92667861e9`.
+
+The downloaded macOS arm64 asset from
+[v1.297.0](https://github.com/kazi-org/kazi/releases/tag/v1.297.0) passed all
+16 offline scenarios: four bounded-repair, four acceptance-integrity, four
+complete-dispatch-contract and four accounting cases. Its SHA-256 matches the
+published checksum:
+`9c2bdc135dad2ed09e781b4978448b3a5b3d3fd5cd5c940b7d1c2b32dd610dd7`.
+The accounting checks read independent public CLI processes and persisted rows;
+a missing second report stays partial coverage and never becomes zero usage.
+
+Release workflow 34122056377 passed all four platform jobs and its publication
+steps. Native local execution covered macOS arm64; the other architectures were
+checked by their release jobs. The active Kazi executable was not replaced, and
+these smoke scenarios made no paid provider requests.
