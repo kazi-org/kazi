@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import pathlib
@@ -21,6 +22,7 @@ env = dict(
     PATH=str(bin) + ":" + os.environ["PATH"],
     KAZI_DB=str(root / "db.sqlite"),
     KAZI_STATE_DIR=str(root / "state"),
+    KAZI_SINKS_DIR=str(root / "runs"),
     ERL_FLAGS="+S 2:2",
     KAZI_SESSION_COLLECTOR="false",
     KAZI_VELOCITY_COLLECTOR="false",
@@ -33,7 +35,7 @@ def cli(args, code=0):
         [
             str(release),
             "eval",
-            'Kazi.Release.cli(Jason.decode!(System.fetch_env!("KAZI_SMOKE_ARGS")))',
+            'Application.put_env(:kazi, :sinks_dir, System.fetch_env!("KAZI_SINKS_DIR")); Kazi.Release.cli(Jason.decode!(System.fetch_env!("KAZI_SMOKE_ARGS")))',
         ]
         if mix_release
         else [str(release), *args]
@@ -43,9 +45,12 @@ def cli(args, code=0):
     )
     (root / "last-output").write_text(p.stdout + p.stderr)
     assert p.returncode == code, (args, p.returncode, p.stdout, p.stderr)
-    return next(
+    result = next(
         json.loads(x) for x in reversed(p.stdout.splitlines()) if x.startswith("{")
     )
+
+    assert result["schema_version"] == 2, result
+    return result
 
 
 print(cli(["version", "--json"]), flush=True)
@@ -93,8 +98,17 @@ for entry in ["file", "proposal"]:
         if not fix:
             h = result["stuck_bundle"]["handoff"]
             assert h["total_dispatches"] == 2
-            assert pathlib.Path(h["contract"]["path"]).is_file()
-            assert pathlib.Path(h["verification"]["path"]).is_file()
+            for key in ["contract", "verification"]:
+                artifact = h[key]
+                path = pathlib.Path(artifact["path"])
+                assert path.is_relative_to(root)
+                content = path.read_bytes()
+                assert hashlib.sha256(content).hexdigest() == artifact["sha256"]
+                assert artifact["status"] == "available"
+            assert (
+                "complete repair contract"
+                in pathlib.Path(h["contract"]["path"]).read_text()
+            )
         print(entry, fix, result["status"], "launches=2", flush=True)
 print("PASS: 4 isolated release bounded repair scenarios", flush=True)
 worker.write_text(
