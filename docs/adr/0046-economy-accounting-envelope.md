@@ -126,3 +126,25 @@ token-economy program rests on is one un-summed map away.
 - **Make `cost_usd` mandatory.** Forces a guess for harnesses/models without a price,
   inviting fabricated numbers. Optional-with-fidelity-marker keeps it honest.
 </content>
+
+
+## 2026-09-07 amendment: report provenance and conserve disjoint tokens
+
+The additive `usage_provenance` snapshot records report coverage over every
+controller dispatch attempt, including failures. Its scope is cumulative for a
+run: repeated observations and terminal projection replace the snapshot; they
+never add it again. Run and iteration rows retain the snapshot, while historical
+rows with no snapshot remain unknown.
+
+A harness dollar figure is `harness_reported_unverified`; a price-table fallback
+is `price_map_estimate`, tagged with the table date and complete/partial token
+split. Neither establishes settled provider spend: `actual_cost_usd` remains
+null. Existing numeric `cost_usd` fields remain for compatibility, with the new
+basis and coverage alongside. No provider lookup or price update is introduced.
+
+Reasoning tokens are a subset of output in this normalized envelope. They remain
+visible but are no longer added to total tokens or priced a second time. An empty
+usage map no longer produces a fabricated zero-dollar estimate; explicit zero
+reports still do. These correct prior arithmetic/unknown handling without
+changing configured budget ceilings, token weights or the dated price table.
+The controller's admission limits still cannot guarantee a settled invoice cap.
