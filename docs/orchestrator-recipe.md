@@ -661,3 +661,15 @@ undefined sensitivity. Untargeted guards are excluded. The persisted coverage
 map records target identities and counts; historical rows without it retain
 unknown coverage. The legacy two-vector scorer infers targets and labels that
 coverage explicitly. Fault application must be established before scoring.
+
+### Require behavioral red before dispatch
+
+Change goals may declare `[qualification] required_red = ["behavior"]` (or the
+same JSON table in a proposal). Every named acceptance predicate must explicitly
+fail after setup and before dispatch. Passing, missing, errored or unknown
+results do not qualify; guard and `landed` targets are invalid. Qualification
+is opt-in, so legacy admission and check-only behavior remain unchanged.
+Successful admission retains selected baseline verdicts, baseline identity,
+evaluator configuration fingerprint and available evidence references in the
+run record and result. Missing provenance is explicit; a configuration hash
+alone does not certify verifier content or behavioral correctness.
