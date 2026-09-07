@@ -606,6 +606,7 @@ defmodule Kazi.Goal.Loader do
          # observation (e.g. `mix deps.get` for a mix-backed predicate goal).
          {:ok, setup} <- build_setup(Map.get(data, "setup")),
          {:ok, all} <- build_predicates(raw_predicates),
+         {:ok, qualification} <- Kazi.Qualification.parse(Map.get(data, "qualification"), all),
          # T12.2 drift guard (ADR-0020 §Decision 3): cross-validate the taxonomy
          # once both groups and predicates are parsed — every predicate `group`
          # and every group `parent` must reference a DECLARED id, and the parent
@@ -647,6 +648,7 @@ defmodule Kazi.Goal.Loader do
           conventions: conventions,
           escalation: escalation,
           setup: setup,
+          qualification: qualification,
           metadata: Map.get(data, "metadata", %{})
         )
 
@@ -939,6 +941,9 @@ defmodule Kazi.Goal.Loader do
   # positive integer), defaulting to `Kazi.Setup.default_timeout_ms/0`. Absent
   # block -> nil (no setup step, byte-identical to before this feature
   # existed). Wrong types fail loudly at load.
+  @doc false
+  def parse_setup(value), do: build_setup(value)
+
   defp build_setup(nil), do: {:ok, nil}
 
   defp build_setup(setup) when is_map(setup) do
