@@ -65,3 +65,8 @@ if workspaces = System.get_env("KAZI_VELOCITY_WORKSPACES") do
            paths
          )
 end
+
+# Keep transcript and repair-evidence sinks relocatable for isolated CLI runs.
+if sinks_dir = System.get_env("KAZI_SINKS_DIR") do
+  config :kazi, :sinks_dir, Path.expand(sinks_dir)
+end

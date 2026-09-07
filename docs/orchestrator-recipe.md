@@ -721,3 +721,7 @@ when no verifier inputs were sealed. The declared-fault runner currently support
 custom-script checks with a nonempty seal; other provider sets are inconclusive.
 It supervises checker subprocesses and reports worktree cleanup failures instead
 of returning a successful audit with stranded workspace state.
+
+For isolated installed-CLI verification, `KAZI_DB` selects the read-model file
+and `KAZI_SINKS_DIR` selects the transcript, event and repair-artifact directory.
+Set both to temporary locations when running offline release fixtures.
