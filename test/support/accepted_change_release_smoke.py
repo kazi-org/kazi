@@ -296,3 +296,66 @@ for entry in ["file", "proposal"]:
             entry, described, "complete contract retained over 2 launches", flush=True
         )
 print("PASS: 4 isolated release dispatch-contract scenarios", flush=True)
+
+# Accounting crosses independent executable invocations and durable SQLite rows.
+# The first launch exits nonzero after reporting spend; that report still counts.
+import sqlite3
+
+first_report = {
+    "modelUsage": {"fixture": {"inputTokens": 10000, "outputTokens": 42533,
+                              "cacheReadInputTokens": 1300000, "cacheCreationInputTokens": 0}},
+    "usage": {"input_tokens": 1277629, "output_tokens": 0,
+              "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+    "total_cost_usd": 2.017401,
+}
+second_report = {"modelUsage": {"fixture": {"inputTokens": 10, "outputTokens": 20,
+                                           "cacheReadInputTokens": 50, "cacheCreationInputTokens": 20}}}
+for entry in ["file", "proposal"]:
+    for reported in [True, False]:
+        work = root / f"accounting-{entry}-{reported}"
+        work.mkdir()
+        worker.write_text(
+            '#!/bin/sh\nn=$(cat count 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > count\n'
+            + "if test \"$n\" = 1; then\ncat <<'JSON'\n" + json.dumps(first_report)
+            + "\nJSON\nexit 1\nfi\ntouch fixed\ncat <<'JSON'\n"
+            + json.dumps(second_report if reported else {"result": "done"}) + "\nJSON\n"
+        )
+        goal_id = work.name
+        predicate = {"id": "code", "provider": "custom_script", "cmd": "sh",
+                     "args": ["-c", "test -f fixed"], "verdict": "exit_zero"}
+        if entry == "proposal":
+            payload = {"goal_id": goal_id, "predicates": [predicate],
+                       "budget": {"max_total_dispatches": 2}, "enforcement": {"enabled": False}}
+            ref = cli(["plan", "--json", "--predicates", json.dumps(payload)])["proposal_ref"]
+            cli(["approve", ref, "--json"])
+        else:
+            goal = work / "goal.toml"
+            goal.write_text(f'id={json.dumps(goal_id)}\n[budget]\nmax_total_dispatches=2\n[enforcement]\nenabled=false\n[[predicate]]\n'
+                            + "\n".join(f"{k}={json.dumps(v)}" for k, v in predicate.items()) + "\n")
+            ref = str(goal)
+        result = cli(["apply", ref, "--workspace", str(work), "--harness", "claude",
+                      "--model", "fixture-unpriced", "--json"])
+        expected = 1352533 + (100 if reported else 0)
+        assert result["status"] == "converged", result
+        assert (work / "count").read_text().strip() == "2"
+        assert result["budget_spent"]["tokens"] == expected, result
+        assert result["economy"]["tokens"] == expected
+        p = result["usage_provenance"]
+        assert p["dispatches"] == 2 and p["usage_reports"] == (2 if reported else 1), p
+        assert p["usage_coverage"] == ("complete" if reported else "partial"), p
+        assert p["cost_coverage"] == "partial" and p["cost_reports"] == 1, p
+        assert p["cost_basis"] == "harness_reported_unverified", p
+        assert p["reported_cost_usd"] == 2.017401 and p["actual_cost_usd"] is None, p
+        status = cli(["status", goal_id, "--json"])
+        assert status["usage_provenance"] == p and status["usage"] == result["usage"], status
+        [group] = cli(["economy", "--goal", goal_id, "--json"])["groups"]
+        assert group["tokens"]["p50"] == expected, group
+        assert group["usage_provenance"]["runs_by_cost_coverage"] == {"partial": 1}, group
+        assert group["usage_provenance"]["known_reported_cost_usd"] == 2.017401, group
+        with sqlite3.connect(env["KAZI_DB"]) as db:
+            rows = db.execute("SELECT usage_provenance FROM runs WHERE goal_ref = ?", (goal_id,)).fetchall()
+            assert len(rows) == 1 and json.loads(rows[0][0]) == p, rows
+            snapshots = db.execute("SELECT usage_provenance FROM iterations WHERE goal_ref = ? ORDER BY iteration_index", (goal_id,)).fetchall()
+            assert json.loads(snapshots[-1][0]) == p, snapshots
+        print(entry, reported, f"accounting conserved {expected} tokens and unverified $2.017401", flush=True)
+print("PASS: 4 isolated release accounting scenarios", flush=True)
