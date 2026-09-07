@@ -364,6 +364,35 @@ defmodule Kazi.Harness.ClaudeAdapterTest do
       assert result.cost == %{tokens: 5350}
     end
 
+    test "complete per-model accounting crosses the executable adapter boundary", %{
+      workspace: workspace
+    } do
+      script = Path.join(workspace, "model-usage-stub.sh")
+
+      payload =
+        Jason.encode!(%{
+          "result" => "done",
+          "usage" => %{"input_tokens" => 1, "output_tokens" => 2},
+          "modelUsage" => %{
+            "model-a" => %{
+              "inputTokens" => 100,
+              "outputTokens" => 200,
+              "cacheReadInputTokens" => 300,
+              "cacheCreationInputTokens" => 40
+            }
+          }
+        })
+
+      File.write!(script, "#!/bin/sh\ncat <<'USAGE_FIXTURE'\n" <> payload <> "\nUSAGE_FIXTURE\n")
+      File.chmod!(script, 0o755)
+
+      assert {:ok, result} = ClaudeAdapter.run("fix it", workspace, command: script)
+      assert result.tokens == 640
+      assert result.cost == %{tokens: 640}
+      assert result.usage_source == :model_usage
+      assert result.usage_fidelity == :full
+    end
+
     test "token total honors per-component env overrides on the stub", %{workspace: workspace} do
       System.put_env("STUB_INPUT_TOKENS", "10")
       System.put_env("STUB_OUTPUT_TOKENS", "20")

@@ -227,7 +227,8 @@ defmodule Kazi.Harness.Profiles.Claude do
   `%{}`, so the caller keeps its back-compat base map and never crashes on a
   surprising harness.
 
-  Recognised fields: `result` (final text), `usage` (summed to a token total,
+  Recognised fields: `result` (final text), complete `modelUsage` (preferred),
+  or top-level `usage` (fallback, summed to a token total,
   surfaced as `:tokens` and `:cost => %{tokens: n}`, AND mapped onto the
   per-field economy envelope — `:usage`/`:usage_raw`/`:usage_fidelity`, T34.2),
   `total_cost_usd` (`:cost_usd`), a touched working set (`:touched`), — when a
@@ -278,10 +279,12 @@ defmodule Kazi.Harness.Profiles.Claude do
   end
 
   defp extract_fields(envelope) do
+    usage_envelope = select_usage(envelope)
+
     %{}
     |> put_result(envelope)
-    |> put_tokens(envelope)
-    |> put_usage(envelope)
+    |> put_tokens(usage_envelope)
+    |> put_usage(usage_envelope)
     |> put_cost(envelope)
     |> put_touched(envelope)
     |> put_tool_uses(envelope)
@@ -302,10 +305,21 @@ defmodule Kazi.Harness.Profiles.Claude do
 
   defp put_result(acc, _envelope), do: acc
 
+  @usage_mapping [
+    {"input_tokens", :input_tokens},
+    {"output_tokens", :output_tokens},
+    {"cache_creation_input_tokens", :cache_write_tokens},
+    {"cache_read_input_tokens", :cached_input_tokens}
+  ]
+
   defp put_tokens(acc, %{"usage" => %{} = usage}) do
-    case total_tokens(usage) do
-      0 -> acc
-      total -> acc |> Map.put(:tokens, total) |> Map.put(:cost, %{tokens: total})
+    case Kazi.Harness.Usage.map(usage, @usage_mapping) do
+      {_, :none} ->
+        acc
+
+      {fields, _fidelity} ->
+        total = fields |> Map.values() |> Enum.sum()
+        acc |> Map.put(:tokens, total) |> Map.put(:cost, %{tokens: total})
     end
   end
 
@@ -325,27 +339,23 @@ defmodule Kazi.Harness.Profiles.Claude do
   # A field the provider did not report is OMITTED (absent ≠ zero); a usage
   # object reporting none of the four — or an envelope with no `usage` at all —
   # is `:usage_fidelity => :none`, never a zero-filled split.
-  @usage_mapping [
-    {"input_tokens", :input_tokens},
-    {"output_tokens", :output_tokens},
-    {"cache_creation_input_tokens", :cache_write_tokens},
-    {"cache_read_input_tokens", :cached_input_tokens}
-  ]
 
-  defp put_usage(acc, %{"usage" => %{} = usage}) do
+  defp put_usage(acc, %{"usage" => %{} = usage} = source) do
     case Kazi.Harness.Usage.map(usage, @usage_mapping) do
       {_envelope, :none} ->
-        Map.put(acc, :usage_fidelity, :none)
+        acc |> Map.put(:usage_fidelity, :none) |> Map.put(:usage_source, :none)
 
       {envelope, fidelity} ->
         acc
         |> Map.put(:usage, envelope)
         |> Map.put(:usage_raw, usage)
         |> Map.put(:usage_fidelity, fidelity)
+        |> Map.put(:usage_source, Map.get(source, :selected_usage_source, :top_level_usage))
     end
   end
 
-  defp put_usage(acc, _envelope), do: Map.put(acc, :usage_fidelity, :none)
+  defp put_usage(acc, _envelope),
+    do: acc |> Map.put(:usage_fidelity, :none) |> Map.put(:usage_source, :none)
 
   defp put_cost(acc, %{"total_cost_usd" => cost}) when is_number(cost),
     do: Map.put(acc, :cost_usd, cost)
@@ -421,21 +431,42 @@ defmodule Kazi.Harness.Profiles.Claude do
   defp maybe_put_denial(map, _key, nil), do: map
   defp maybe_put_denial(map, key, value), do: Map.put(map, key, value)
 
-  @spec total_tokens(map()) :: non_neg_integer()
-  defp total_tokens(usage) do
-    [
-      "input_tokens",
-      "output_tokens",
-      "cache_creation_input_tokens",
-      "cache_read_input_tokens"
-    ]
-    |> Enum.reduce(0, fn key, sum ->
-      case Map.get(usage, key) do
-        n when is_integer(n) and n >= 0 -> sum + n
-        _ -> sum
-      end
-    end)
+  # Claude's modelUsage and usage envelopes overlap. Only aggregate modelUsage
+  # when every model reports all four disjoint token classes; otherwise retain
+  # the top-level envelope as one source, with its existing partial fidelity.
+  @model_usage_mapping [
+    {"inputTokens", "input_tokens"},
+    {"outputTokens", "output_tokens"},
+    {"cacheCreationInputTokens", "cache_creation_input_tokens"},
+    {"cacheReadInputTokens", "cache_read_input_tokens"}
+  ]
+
+  defp select_usage(%{"modelUsage" => models} = envelope)
+       when is_map(models) and map_size(models) > 0 do
+    complete? =
+      Enum.all?(models, fn {_model, usage} ->
+        is_map(usage) and
+          Enum.all?(@model_usage_mapping, fn {key, _} ->
+            value = Map.get(usage, key)
+            is_integer(value) and value >= 0
+          end)
+      end)
+
+    if complete? do
+      aggregate =
+        Map.new(@model_usage_mapping, fn {source, target} ->
+          {target, Enum.reduce(models, 0, fn {_model, usage}, sum -> sum + usage[source] end)}
+        end)
+
+      envelope
+      |> Map.put("usage", aggregate)
+      |> Map.put(:selected_usage_source, :model_usage)
+    else
+      envelope
+    end
   end
+
+  defp select_usage(envelope), do: envelope
 
   @spec touched_files(map()) :: [String.t()]
   defp touched_files(envelope) do

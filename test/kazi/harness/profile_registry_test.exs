@@ -64,7 +64,12 @@ defmodule Kazi.Harness.ProfileRegistryTest do
 
       # A valid envelope with no usage object reports :none fidelity (T34.2,
       # ADR-0046) — never zero-filled token fields.
-      assert Profile.parse(profile, ~s({"result":"ok"})) == %{result: "ok", usage_fidelity: :none}
+      assert Profile.parse(profile, ~s({"result":"ok"})) == %{
+               result: "ok",
+               usage_fidelity: :none,
+               usage_source: :none
+             }
+
       # A non-object envelope degrades to %{} (additive, never crashes).
       assert Profile.parse(profile, "not json") == %{}
     end

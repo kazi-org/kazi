@@ -48,7 +48,8 @@ defmodule Kazi.Harness.ConformanceTest do
               "cache_creation_input_tokens" => 0,
               "cache_read_input_tokens" => 5000
             },
-            usage_fidelity: :full
+            usage_fidelity: :full,
+            usage_source: :top_level_usage
           }
         )
 
@@ -126,7 +127,8 @@ defmodule Kazi.Harness.ConformanceTest do
             "cache_creation_input_tokens" => 0,
             "cache_read_input_tokens" => 5000
           },
-          usage_fidelity: :full
+          usage_fidelity: :full,
+          usage_source: :top_level_usage
         }
       )
     end
@@ -166,7 +168,8 @@ defmodule Kazi.Harness.ConformanceTest do
             "cache_creation_input_tokens" => 0,
             "cache_read_input_tokens" => 5000
           },
-          usage_fidelity: :full
+          usage_fidelity: :full,
+          usage_source: :top_level_usage
         }
       )
     end
