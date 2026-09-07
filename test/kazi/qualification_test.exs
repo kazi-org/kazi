@@ -98,6 +98,7 @@ defmodule Kazi.QualificationTest do
     assert row.qualification["evaluator_fingerprint"] ==
              result.qualification["evaluator_fingerprint"]
 
-    assert row.qualification["baseline"]["kind"] == "non_git"
+    assert row.qualification["baseline"]["kind"] == "git"
+    assert byte_size(row.qualification["baseline"]["commit"]) == 40
   end
 end
