@@ -318,6 +318,7 @@ defmodule Kazi.Loop do
   defmodule Data do
     @moduledoc false
     defstruct goal: nil,
+              repair_handoff: nil,
               # injected behaviour impls
               providers: %{},
               harness: nil,
@@ -1028,6 +1029,15 @@ defmodule Kazi.Loop do
 
     data = %Data{
       goal: goal,
+      repair_handoff:
+        if(goal.budget.max_total_dispatches,
+          do:
+            Kazi.Context.RepairHandoff.start(
+              goal,
+              Keyword.get(opts, :workspace),
+              Keyword.get(opts, :extra_action_context, %{})
+            )
+        ),
       providers: fetch!(opts, :providers),
       harness: fetch!(opts, :harness),
       integrate: fetch!(opts, :integrate),
@@ -3627,13 +3637,30 @@ defmodule Kazi.Loop do
   defp maybe_attach_stuck_bundle(result, %Data{} = data) do
     case stop_reason(data) do
       :stuck -> Map.put(result, :stuck_bundle, build_stuck_bundle(data))
+      :max_total_dispatches -> Map.put(result, :stuck_bundle, build_stuck_bundle(data))
       _ -> result
     end
   end
 
+  defp repair_handoff(%Data{repair_handoff: nil}, _ids), do: nil
+
+  defp repair_handoff(data, ids) do
+    attempts = AttemptLedger.fold(ordered_history(data), Enum.reverse(data.dispatch_log))
+
+    Kazi.Context.RepairHandoff.finish(
+      data.repair_handoff,
+      data.workspace,
+      stop_reason(data),
+      data.dispatches,
+      ids,
+      attempts,
+      %{seal: Kazi.Seal.verify(data.seal_manifest) == :ok, vector: data.vector}
+    )
+  end
+
   @spec build_stuck_bundle(Data.t()) :: StuckBundle.t()
   defp build_stuck_bundle(%Data{} = data) do
-    failing_ids = stuck_failing_list(data.stuck_failing) || []
+    failing_ids = stuck_failing_list(data.stuck_failing) || PredicateVector.failing(data.vector)
 
     failing =
       for id <- failing_ids do
@@ -3645,6 +3672,7 @@ defmodule Kazi.Loop do
     StuckBundle.assemble(
       %{
         failing: failing,
+        handoff: repair_handoff(data, failing_ids),
         changed_files: data.working_set_digest.files,
         snippets: stuck_snippets(data, failing_ids, budget),
         # (issue #769) `changed_files: []` PLUS a populated `permission_denials` is
