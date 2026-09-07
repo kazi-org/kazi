@@ -640,3 +640,13 @@ under `--json` -- that surface stays pure per the stdout contract above.
 - `docs/adr/0044-kazi-mcp-installed-subcommand.md` -- `kazi mcp` as a first-class
   installed subcommand (the installed leg of the MCP surface).
 - `docs/schemas/run-result.md`, `docs/schemas/status.md` -- the committed schemas.
+
+### Proposal verification protections
+
+Caller-drafted proposals preserve predicate `held_out` booleans and top-level
+`seal` and `enforcement` tables through plan, approval, editing and reload.
+These tables use the goal-file validators, including enforcement guards and
+role policies. Malformed protection values are rejected before dispatch.
+Held-out checks are omitted from the worker prompt; sealed-input edits void
+the run as `tampered`. These mechanisms do not provide OS isolation or prevent
+a worker with shell access from reading workspace files.
