@@ -103,7 +103,17 @@ defmodule Kazi.Audit.Workspace do
     task =
       Task.async(fn ->
         try do
-          Runtime.check(goal, workspace: work)
+          Runtime.check(goal,
+            workspace: work,
+            setup_command_runner: fn cmd, args, cmd_opts, command_timeout ->
+              pid_file = Path.join(root, "#{Ecto.UUID.generate()}.pid")
+
+              {wrapped, wrapped_args} =
+                Kazi.Harness.ChildSupervisor.wrap(cmd, args, pid_file: pid_file)
+
+              CommandRunner.run(wrapped, wrapped_args, cmd_opts, min(timeout, command_timeout))
+            end
+          )
         rescue
           error -> {:error, {:checker_error, Exception.message(error)}}
         catch
