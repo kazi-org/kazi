@@ -118,6 +118,106 @@ defmodule Kazi.Harness.UsageTest do
     end
   end
 
+  describe "Claude.parse/1 complete modelUsage source (T76.1)" do
+    defp model_usage(input \\ 100, output \\ 200, read \\ 300, write \\ 0) do
+      %{
+        "inputTokens" => input,
+        "outputTokens" => output,
+        "cacheReadInputTokens" => read,
+        "cacheCreationInputTokens" => write
+      }
+    end
+
+    test "prefers complete per-model totals over an overlapping smaller top-level usage" do
+      raw = %{
+        "modelUsage" => %{"model-a" => model_usage(10_000, 42_533, 1_300_000, 0)},
+        "usage" => %{
+          "input_tokens" => 10_000,
+          "output_tokens" => 42_533,
+          "cache_read_input_tokens" => 1_225_096,
+          "cache_creation_input_tokens" => 0
+        }
+      }
+
+      parsed = Claude.parse(Jason.encode!(raw))
+      assert parsed.tokens == 1_352_533
+      assert parsed.cost == %{tokens: 1_352_533}
+      assert parsed.usage_source == :model_usage
+      assert parsed.usage_fidelity == :full
+      assert Enum.sum(Map.values(parsed.usage)) == parsed.tokens
+    end
+
+    test "sums complete models once and does not add reasoning again" do
+      raw = %{
+        "modelUsage" => %{
+          "model-a" => Map.put(model_usage(), "thinkingTokens", 150),
+          "model-b" => model_usage(20, 30, 40, 50)
+        }
+      }
+
+      parsed = Claude.parse(Jason.encode!(raw))
+      assert parsed.tokens == 740
+
+      assert parsed.usage == %{
+               input_tokens: 120,
+               output_tokens: 230,
+               cached_input_tokens: 340,
+               cache_write_tokens: 50
+             }
+
+      assert parsed.usage_source == :model_usage
+    end
+
+    for {name, bad} <- [
+          empty: %{},
+          missing: %{"model-a" => %{"inputTokens" => 7}},
+          negative: %{"model-a" => %{"inputTokens" => -1}},
+          non_numeric: %{"model-a" => %{"inputTokens" => "7"}},
+          non_map_entry: %{"model-a" => nil}
+        ] do
+      test "#{name} per-model source falls back as a whole to valid top-level usage" do
+        raw = %{
+          "modelUsage" => unquote(Macro.escape(bad)),
+          "usage" => %{
+            "input_tokens" => 7,
+            "output_tokens" => 8,
+            "cache_read_input_tokens" => 9,
+            "cache_creation_input_tokens" => 0
+          }
+        }
+
+        parsed = Claude.parse(Jason.encode!(raw))
+        assert parsed.tokens == 24
+        assert parsed.usage_source == :top_level_usage
+        assert parsed.usage_fidelity == :full
+      end
+    end
+
+    test "one partial model invalidates the whole aggregate, never a partial sum" do
+      raw = %{"modelUsage" => %{"complete" => model_usage(), "partial" => %{"inputTokens" => 10}}}
+      parsed = Claude.parse(Jason.encode!(raw))
+      assert parsed.usage_fidelity == :none
+      assert parsed.usage_source == :none
+      refute Map.has_key?(parsed, :tokens)
+    end
+
+    test "fully reported zero is measured, not absent" do
+      parsed =
+        Claude.parse(Jason.encode!(%{"modelUsage" => %{"model-a" => model_usage(0, 0, 0, 0)}}))
+
+      assert parsed.tokens == 0
+      assert parsed.usage_fidelity == :full
+      assert parsed.usage_source == :model_usage
+    end
+
+    test "malformed top-level fields do not fabricate a total" do
+      parsed = Claude.parse(~s({"usage":{"input_tokens":-4,"output_tokens":"unknown"}}))
+      assert parsed.usage_fidelity == :none
+      assert parsed.usage_source == :none
+      refute Map.has_key?(parsed, :tokens)
+    end
+  end
+
   describe "Claude.parse/1 — tool-use names (T34.3, ADR-0046 §2)" do
     test "the default --output-format json envelope carries no per-tool data → :tool_uses absent" do
       parsed = Claude.parse(~s({"result":"done","num_turns":3}))
