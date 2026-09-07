@@ -693,3 +693,15 @@ counter survives model-rung changes. After the final allowed launch, verificatio
 may still converge; otherwise the run stops with `max_total_dispatches` and no
 new rung is launched. Existing `max_dispatches` remains per-rung. A new apply
 invocation starts a new allowance; this does not bound calls inside a harness.
+
+### Resume from a bounded repair handoff
+
+A stopped run with `max_total_dispatches` emits its existing `stuck_bundle` with
+measured base/candidate identity, cumulative launch count, stop reason, failing
+IDs, repeat-attempt fingerprints and verification evidence references. The full
+redacted task contract is retained without truncation beside the existing run
+transcript; the bundle links to it. Missing, changed or disabled artifact storage
+is explicitly diagnosed. A patch hash is identity evidence, not semantic progress.
+The rendered bundle obeys the existing context byte budget; an impossibly small
+budget reports that the handoff cannot fit. Use the artifact to prepare a fresh
+repair session; a separate apply invocation has its own allowance.
