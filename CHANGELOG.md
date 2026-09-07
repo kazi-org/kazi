@@ -16,6 +16,22 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.297.0](https://github.com/kazi-org/kazi/compare/v1.296.1...v1.297.0) (2026-09-07)
+
+
+### Features
+
+* **accounting:** persist usage snapshots across public consumers ([53ed1eb](https://github.com/kazi-org/kazi/commit/53ed1eb5bd95e23b7478588ddf18f09e7240a86f))
+* **economy:** retain cumulative report and cost provenance ([b35ef32](https://github.com/kazi-org/kazi/commit/b35ef32996967acf61886ecd497424a49315f7f0))
+* **read-model:** add nullable usage and provenance snapshots ([e405d2b](https://github.com/kazi-org/kazi/commit/e405d2b52e2233a3d46ff617f8ab339f3ef0a364))
+
+
+### Bug Fixes
+
+* **accounting:** match provenance to supported harness envelopes ([5188bc0](https://github.com/kazi-org/kazi/commit/5188bc05871a08b875a6560f39cefcb38c49a53e))
+* **economy:** retain final usage on contract refusals ([04694d2](https://github.com/kazi-org/kazi/commit/04694d2778157eb97fcba8cf1c91712d29133a61))
+* **harness:** distinguish reported dollars from price estimates ([9b3f5a4](https://github.com/kazi-org/kazi/commit/9b3f5a42da21e2216e4d29ed62ebfe120b40eaed))
+
 ## [1.296.1](https://github.com/kazi-org/kazi/compare/v1.296.0...v1.296.1) (2026-09-07)
 
 
