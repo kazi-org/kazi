@@ -256,17 +256,42 @@ defmodule Kazi.Harness.CliAdapter do
   # T34.5 (ADR-0046): derive `cost_usd` from the dated price map ONLY when the
   # harness reported a token split but no dollar figure, and the run's model is
   # one the map prices. A harness-reported `:cost_usd` (Claude's `total_cost_usd`)
-  # is authoritative and left untouched; a missing token split, a missing model,
+  # is retained as an unverified report; a missing token split, a missing model,
   # or a model the map does not name leaves `cost_usd` ABSENT — never guessed.
   @spec put_priced_cost(map(), keyword()) :: map()
   defp put_priced_cost(result, build_opts) do
-    with false <- Map.has_key?(result, :cost_usd),
-         %{} = usage <- Map.get(result, :usage),
-         model when is_binary(model) <- Keyword.get(build_opts, :model),
-         {:ok, cost} <- PriceMap.cost_usd(model, usage) do
-      Map.put(result, :cost_usd, cost)
-    else
-      _ -> result
+    case Map.get(result, :cost_usd) do
+      cost when is_number(cost) and cost >= 0 ->
+        result
+        |> Map.put(:cost_basis, :harness_reported_unverified)
+        |> Map.put(:cost_fidelity, :unverified)
+
+      _ ->
+        result = Map.delete(result, :cost_usd)
+
+        with %{} = usage <- Map.get(result, :usage),
+             model when is_binary(model) <- Keyword.get(build_opts, :model),
+             {:ok, cost} <- PriceMap.cost_usd(model, usage) do
+          complete? =
+            Enum.all?(
+              [:input_tokens, :cached_input_tokens, :cache_write_tokens, :output_tokens],
+              fn key ->
+                value = Map.get(usage, key, Map.get(usage, to_string(key)))
+                is_integer(value) and value >= 0
+              end
+            )
+
+          result
+          |> Map.put(:cost_usd, cost)
+          |> Map.put(:cost_basis, :price_map_estimate)
+          |> Map.put(:price_map_as_of, PriceMap.as_of())
+          |> Map.put(
+            :cost_fidelity,
+            if(complete?, do: :complete_token_split, else: :partial_token_split)
+          )
+        else
+          _ -> result
+        end
     end
   end
 
