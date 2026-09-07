@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.295.1](https://github.com/kazi-org/kazi/compare/v1.295.0...v1.295.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **harness:** prefer complete Claude per-model usage ([4abc0c0](https://github.com/kazi-org/kazi/commit/4abc0c044dd5d7a82f00aacf8b025069cb5264c5))
+
 ## [1.295.0](https://github.com/kazi-org/kazi/compare/v1.294.0...v1.295.0) (2026-09-06)
 
 
