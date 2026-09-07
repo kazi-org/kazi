@@ -34,6 +34,104 @@ defmodule Kazi.CLIApplyProposalRefTest do
     {:ok, work: work}
   end
 
+  test "proposal and goal-file protections hide checks and reject sealed edits", %{work: root} do
+    for entry <- [:proposal, :file] do
+      work = Path.join(root, to_string(entry))
+      File.mkdir_p!(work)
+      File.write!(Path.join(work, "checker.sh"), "original")
+
+      payload = %{
+        "goal_id" => "protected-#{entry}",
+        "name" => "protected repair",
+        "predicates" => [
+          %{
+            "id" => "code",
+            "provider" => "custom_script",
+            "config" => %{
+              "cmd" => "sh",
+              "args" => ["-c", "test -f fixed.txt"],
+              "verdict" => "exit_zero"
+            }
+          },
+          %{
+            "id" => "hidden-sentinel",
+            "description" => "SECRET-CHECK",
+            "held_out" => true,
+            "provider" => "custom_script",
+            "config" => %{"cmd" => "true", "verdict" => "exit_zero"}
+          }
+        ],
+        "seal" => %{"sealed_inputs" => ["checker.sh"]},
+        "enforcement" => %{"enabled" => false}
+      }
+
+      ref =
+        case entry do
+          :proposal ->
+            out =
+              capture_io(fn ->
+                assert Kazi.CLI.run(["plan", "--json", "--predicates", Jason.encode!(payload)]) ==
+                         0
+              end)
+
+            Jason.decode!(String.trim(out))["proposal_ref"] |> approve()
+
+          :file ->
+            path = Path.join(work, "goal.toml")
+
+            File.write!(path, """
+            id = "protected-file"
+            mode = "create"
+            [seal]
+            sealed_inputs = ["checker.sh"]
+            [enforcement]
+            enabled = false
+            [[predicate]]
+            id = "code"
+            provider = "custom_script"
+            acceptance = true
+            cmd = "sh"
+            args = ["-c", "test -f fixed.txt"]
+            verdict = "exit_zero"
+            [[predicate]]
+            id = "hidden-sentinel"
+            description = "SECRET-CHECK"
+            held_out = true
+            provider = "custom_script"
+            acceptance = true
+            cmd = "true"
+            verdict = "exit_zero"
+            """)
+
+            path
+        end
+
+      script = Path.join(work, "worker.sh")
+
+      File.write!(
+        script,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > captured.txt\ntouch fixed.txt\necho edited > checker.sh\n"
+      )
+
+      File.chmod!(script, 0o755)
+
+      out =
+        capture_io(fn ->
+          assert Kazi.CLI.run(["apply", ref, "--workspace", work, "--json"],
+                   adapter_opts: [command: script],
+                   reobserve_interval_ms: 5,
+                   await_timeout: 15_000
+                 ) == 1
+        end)
+
+      result = Jason.decode!(String.trim(out))
+      assert result["status"] == "tampered"
+      prompt = File.read!(Path.join(work, "captured.txt"))
+      refute prompt =~ "hidden-sentinel"
+      refute prompt =~ "SECRET-CHECK"
+    end
+  end
+
   # The orchestrator's step 1: `plan --json` in caller-drafts mode, naming the
   # goal via the payload's goal_id (T39.1). Returns the minted proposal_ref.
   defp plan_proposal(goal_id) do
