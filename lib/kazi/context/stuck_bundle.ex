@@ -95,10 +95,16 @@ defmodule Kazi.Context.StuckBundle do
         "snippets" => snippets
       }
       |> put_permission_denials(input)
+      |> put_handoff(input)
       |> fit_budget(budget)
 
     Map.put(bundle, "bytes", byte_size(render(bundle)))
   end
+
+  defp put_handoff(bundle, %{handoff: handoff}) when is_map(handoff),
+    do: Map.put(bundle, "handoff", handoff)
+
+  defp put_handoff(bundle, _), do: bundle
 
   # (issue #769) The names of tool calls the harness had DENIED. Present only when
   # there were any, so an unaffected bundle's shape is byte-for-byte unchanged.
@@ -118,6 +124,10 @@ defmodule Kazi.Context.StuckBundle do
   @spec render(t()) :: String.t()
   def render(%{} = bundle) do
     [
+      section(
+        "Repair handoff",
+        if(bundle["handoff"], do: Jason.encode!(bundle["handoff"]), else: "")
+      ),
       section("Failing predicates", failing_lines(bundle["failing_predicates"])),
       section("Last changed files", file_lines(bundle["changed_files"])),
       # (issue #769) Rendered so the ESCALATION prompt says why nothing changed —
@@ -181,9 +191,34 @@ defmodule Kazi.Context.StuckBundle do
             budget
           )
 
+        bundle["changed_files"] != [] ->
+          fit_budget(Map.put(bundle, "changed_files", drop_last(bundle["changed_files"])), budget)
+
+        is_map(bundle["handoff"]) and Map.has_key?(bundle["handoff"], "attempts") ->
+          fit_budget(
+            Map.update!(bundle, "handoff", &Map.drop(&1, ["attempts", "verification"])),
+            budget
+          )
+
+        bundle["failing_predicates"] == [] ->
+          minimal_bundle(bundle, budget)
+
         true ->
-          fit_last_failure(bundle, budget)
+          fitted = fit_last_failure(bundle, budget)
+          if byte_size(render(fitted)) <= budget, do: fitted, else: minimal_bundle(fitted, budget)
       end
+    end
+  end
+
+  defp minimal_bundle(bundle, budget) do
+    minimal = %{bundle | "failing_predicates" => [], "changed_files" => [], "snippets" => []}
+    minimal = Map.delete(minimal, "permission_denials")
+
+    if byte_size(render(minimal)) <= budget do
+      minimal
+    else
+      minimal = Map.put(minimal, "handoff", %{"status" => "budget_too_small"})
+      if byte_size(render(minimal)) <= budget, do: minimal, else: Map.delete(minimal, "handoff")
     end
   end
 
