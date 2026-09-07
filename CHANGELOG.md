@@ -16,6 +16,28 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.296.0](https://github.com/kazi-org/kazi/compare/v1.295.2...v1.296.0) (2026-09-07)
+
+
+### Features
+
+* **audit:** run declared faults in disposable candidate worktrees ([1cff634](https://github.com/kazi-org/kazi/commit/1cff6340b684d4d136c35a4ee0673d4724f9c39c))
+* **budget:** bound total dispatches across model rungs ([7a8144f](https://github.com/kazi-org/kazi/commit/7a8144fc3860169b1e74da383a8691a6556edf21))
+* **context:** retain immutable repair contract and measured handoff ([eedae52](https://github.com/kazi-org/kazi/commit/eedae52e4e35db3115756d0fdccbe080415aa2b3))
+* **qualification:** require declared behavioral failures before dispatch ([9b16d47](https://github.com/kazi-org/kazi/commit/9b16d47f9e8d798857c2b47c53f4dae20441bd02))
+* **storage:** persist baseline qualification evidence ([5511fe4](https://github.com/kazi-org/kazi/commit/5511fe4a656b63130b34017c2d1ca6619c153504))
+
+
+### Bug Fixes
+
+* **acceptance:** reject ambiguous checker failures and retain refusal evidence ([7987706](https://github.com/kazi-org/kazi/commit/7987706e42eed8d7fd4d8192bb13f242f182fce2))
+* **audit:** count only explicit targeted mutation failures ([3f243fa](https://github.com/kazi-org/kazi/commit/3f243fa28d05aebec12cbe64ea690c6fe876de47))
+* **authoring:** preserve proposal verification protections ([671d633](https://github.com/kazi-org/kazi/commit/671d633623735c1c3af380699d5e562bf8971b8d))
+* **cli:** isolate release smoke run sinks and verify artifact hashes ([4bef2d9](https://github.com/kazi-org/kazi/commit/4bef2d93e702a8736fce35b6c673e94b29ad7254))
+* **cli:** remove existing warnings blocking strict compilation ([0e571d2](https://github.com/kazi-org/kazi/commit/0e571d20bf11ce910e4a0d4e9b993b1f3b9c3c83))
+* **delivery:** preserve live verification and supervise audit setup ([a03c77c](https://github.com/kazi-org/kazi/commit/a03c77c567ea93a3aec2041e731489276022eeac))
+* **storage:** retain additive mutation audit coverage ([4dc91d3](https://github.com/kazi-org/kazi/commit/4dc91d351016729b17aa2170e6b9cc9ce3074ff5))
+
 ## [1.295.2](https://github.com/kazi-org/kazi/compare/v1.295.1...v1.295.2) (2026-09-07)
 
 
