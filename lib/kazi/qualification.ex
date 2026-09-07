@@ -43,8 +43,14 @@ defmodule Kazi.Qualification do
     evidence = %{
       "required_red" => ids,
       "verdicts" => verdicts,
+      "unsupported_failures" =>
+        Enum.filter(ids, fn id ->
+          result = PredicateVector.get(vector, id)
+          result && result.status == :fail && not Kazi.Audit.BehavioralFailure.supported?(result)
+        end),
       "baseline" => baseline(workspace),
-      "evaluator_fingerprint" => fingerprint(Goal.all_predicates(goal)),
+      "evaluator_config_fingerprint" => fingerprint(Goal.all_predicates(goal)),
+      "evaluator_fingerprint" => evaluator_fingerprint(goal, workspace),
       "evidence_refs" =>
         Map.new(ids, fn id ->
           result = PredicateVector.get(vector, id)
@@ -57,9 +63,22 @@ defmodule Kazi.Qualification do
         end)
     }
 
-    if Enum.all?(verdicts, fn {_, status} -> status == "fail" end),
+    if Enum.all?(ids, &Kazi.Audit.BehavioralFailure.supported?(PredicateVector.get(vector, &1))),
       do: {:ok, evidence},
       else: {:error, {:qualification_failed, evidence}}
+  end
+
+  defp evaluator_fingerprint(goal, workspace) do
+    manifest = Kazi.Seal.arm(goal.seal, nil, workspace)
+
+    if map_size(manifest) == 0 do
+      nil
+    else
+      inputs =
+        manifest |> Enum.map(fn {label, {_path, digest}} -> {label, digest} end) |> Enum.sort()
+
+      fingerprint({Goal.all_predicates(goal), inputs})
+    end
   end
 
   defp fingerprint(predicates) do
@@ -72,7 +91,7 @@ defmodule Kazi.Qualification do
   defp baseline(workspace) when is_binary(workspace) do
     case System.cmd("git", ["rev-parse", "HEAD"], cd: workspace, stderr_to_stdout: true) do
       {sha, 0} -> %{"kind" => "git", "commit" => String.trim(sha)}
-      _ -> %{"kind" => "non_git", "identity" => nil}
+      _ -> %{"kind" => "non_git", "identity" => fingerprint(Path.expand(workspace))}
     end
   rescue
     _ -> %{"kind" => "unknown", "identity" => nil}
