@@ -24,7 +24,7 @@ defmodule Kazi.Economy.PriceMap do
 
   ## What each token class costs
 
-  The five token classes of the envelope are priced independently, because a
+  The four disjoint token classes of the envelope are priced independently, because a
   provider prices them differently:
 
     * `input_tokens`        — fresh prompt input (full input rate);
@@ -34,11 +34,12 @@ defmodule Kazi.Economy.PriceMap do
     * `cache_write_tokens`  — cache WRITES (the 5-minute-TTL write rate,
       ~1.25× input — the one-time cost of seeding the cache);
     * `output_tokens`       — generated output (full output rate);
-    * `reasoning_tokens`    — extended-thinking tokens, billed at the output rate
-      on the Anthropic models below.
+    * `reasoning_tokens`    — a subset of output, retained for reporting but
+      not added or billed a second time.
 
-  A token class absent from the envelope contributes nothing to the cost — it is
-  a count of zero tokens spent on that class, not an unknown.
+  An absent token class contributes nothing to the estimate, while remaining
+  unknown. The adapter labels such estimates partial. An entirely unreported
+  split yields no estimate; an explicitly reported zero remains known zero.
 
   ## Prices
 
@@ -117,15 +118,14 @@ defmodule Kazi.Economy.PriceMap do
     {:input_tokens, :input},
     {:cached_input_tokens, :cached},
     {:cache_write_tokens, :cache_write},
-    {:output_tokens, :output},
-    {:reasoning_tokens, :reasoning}
+    {:output_tokens, :output}
   ]
 
   # Compile-time coupling guard: the token classes we price must be exactly the
-  # token fields `Kazi.CLI.Usage` renders (its fields minus the computed
+  # token disjoint fields `Kazi.CLI.Usage` renders (excluding the reasoning subset and computed
   # `cost_usd`). A rename or addition there fails the build HERE rather than
   # silently mispricing — keeping the cost model honest against the one renderer.
-  @renderer_token_fields Usage.fields() -- [:cost_usd]
+  @renderer_token_fields Usage.fields() -- [:cost_usd, :reasoning_tokens]
   unless Enum.sort(Enum.map(@priced_fields, &elem(&1, 0))) == Enum.sort(@renderer_token_fields) do
     raise "Kazi.Economy.PriceMap token classes drifted from Kazi.CLI.Usage: " <>
             "priced=#{inspect(Enum.map(@priced_fields, &elem(&1, 0)))} " <>
@@ -158,15 +158,21 @@ defmodule Kazi.Economy.PriceMap do
 
   `usage` is the envelope shape (`%{input_tokens: …, cached_input_tokens: …,
   cache_write_tokens: …, output_tokens: …, reasoning_tokens: …}`), atom or string
-  keys; a token class absent from the envelope costs nothing. The result is
+  keys; only reported classes contribute to this partial estimate. The result is
   rounded to the nearest micro-dollar (6 dp) so repeated runs sum without
   binary-float drift in the last digits.
   """
   @spec cost_usd(term(), map()) :: {:ok, float()} | :error
   def cost_usd(model, usage) when is_binary(model) and is_map(usage) do
     case Map.fetch(@prices, model) do
-      {:ok, sheet} -> {:ok, compute(sheet, usage)}
-      :error -> :error
+      {:ok, sheet} ->
+        if Enum.any?(@priced_fields, fn {field, _} ->
+             value = Map.get(usage, field, Map.get(usage, to_string(field)))
+             is_integer(value) and value >= 0
+           end), do: {:ok, compute(sheet, usage)}, else: :error
+
+      :error ->
+        :error
     end
   end
 
@@ -184,7 +190,7 @@ defmodule Kazi.Economy.PriceMap do
   end
 
   # Read a token field under its atom or string key; a missing or non-integer
-  # value is 0 tokens for that class (it cost nothing), distinct from an unknown
+  # value contributes zero to the partial estimate (its true usage is unknown), distinct from an unknown
   # MODEL (which omits cost entirely).
   @spec tokens(map(), atom()) :: non_neg_integer()
   defp tokens(usage, field) do

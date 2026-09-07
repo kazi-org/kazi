@@ -229,6 +229,8 @@ defmodule Kazi.Economy.History do
       n_with_usage: Enum.count(runs, &(&1.budget_tokens != nil)),
       tokens: percentiles(Enum.map(runs, & &1.budget_tokens)),
       cost_usd: percentiles(Enum.map(runs, & &1.budget_cost_usd)),
+      usage_provenance:
+        Kazi.Economy.UsageProvenance.aggregate(Enum.map(runs, & &1.usage_provenance)),
       dispatch_count: percentiles(Enum.map(runs, & &1.dispatch_count)),
       # T49.9: the same dispatches, attributed. `dispatch_count` above stays the
       # unchanged total (both roles); this names who spent it.
