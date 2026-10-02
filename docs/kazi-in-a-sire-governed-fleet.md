@@ -45,9 +45,10 @@ review/publication path, not permission to bypass it.
 This recommendation follows the existing boundary in
 [ADR-0087: Kazi plans, Sire schedules, one goal per container](adr/0087-kazi-plans-sire-schedules-one-goal-per-container.md)
 and [ADR-0086: write paths and the agent-instruction projection](adr/0086-write-paths-and-the-agents-md-projection.md).
-The [Kazi entrypoint plan](plans/E-KAZI-ENTRYPOINT.md) describes the concrete
-lane integration; use its current task status rather than treating this note
-as a second backlog.
+The [local entrypoint proposal](plans/E-KAZI-ENTRYPOINT.md) supplies historical
+integration context. Neither its local task state nor this recommendation
+establishes fleet uptake; verify the surrounding integration's current gates
+before authoring work.
 
 The ownership recommendation also reflects a limited private integration
 review summarized below: the reviewed design keeps Kazi as a convergence

@@ -12,9 +12,12 @@ follow-up did not start. Keep the existing default policy. See
 tables, accounting boundaries and the recorded partial coordinator-token
 observation. These paid-model results do not certify the source/release checks
 in E74/E76/E78/E79/E80, or vice versa.
+Status: completed study; all approval and allowance language below is historical,
+not authorization for a new trial. See the roadmap for the next evaluation question.
+
 fidelity: executable
 Acceptance: An executable preregistration and offline-qualified matched runner preserve all attempts and distinguish candidate acceptance from actual landing; paid execution remains a separate explicit authorization gate.
-Context: Reuse E74/E76 and ADR-0089; compare the same Claude harness with and without Kazi, not different models or native Fanisi tools. Freeze independent acceptance and account for all failures. E80 owns ledger integration; optional E75 context tuning no longer blocks evaluation. Detailed candidate protocol and decision rules: [delivery plan](accepted-change-delivery.md).
+Context: Reuse E74/E76 and ADR-0089; compare the same Claude harness with and without Kazi, not different models or native Fanisi tools. Freeze independent acceptance and account for all failures. E80 owns ledger integration; optional E75 context tuning no longer blocks evaluation. The completed protocol and measurements are preserved in the [evaluation report](../e77-evaluation-2026-09-08.md); the [delivery record](accepted-change-delivery.md) states current priorities.
 - [x] T77.0 PLAN: preregister bounded matched trials and release decision. Owner: pool Est: 90m kind: plan lane: agent delivers: [Executable E77 with pinned tasks/evaluators, randomized arms, explicit budget and stop rules, actor accounting and separate paired-candidate versus operational-landing outcomes] deps: [T74.3, T76.4, T78.6, T79.4, T80.5] acc: [Plan parser sees executable E77 tasks with resolved dependencies and a frozen protocol distinguishing candidate acceptance from actual landing.]  Done: 2026-09-07 (final offline protocol and artifact qualification)
   Recheck task baselines and source versions; skip already-solved tasks before inference. Carry measured/unknown cost coverage, unsuccessful attempts and amendments forward. Define exact sample and spending limits before dispatch; retain the GLM-only isolated provider constraint. This row starts no paid evaluation itself.
 
