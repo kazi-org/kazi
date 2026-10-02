@@ -12,6 +12,11 @@ data; until then it is hand-maintained under the contract at the bottom.
 Last updated: **2026-10-01** (accepted-change delivery/evaluation record
 reconciled; see current status below).
 
+The October 1 triage also completes T70.8 at source level, adds live-registry
+help parity and current stuck/budget LiveView coverage. See the
+[implementation record](sitrep/2026-10-01-implementation.md) for verification
+and integration limits. The September 5 host-blocked account below is historical.
+
 ## Where we came from
 
 kazi began as a bet (ADR-0001/0002): coding agents don't need a better harness,
@@ -613,7 +618,7 @@ found and fixed a leftover unfilled `PR #TBD` placeholder in the agent's own
 `Done:` entry before merge. **All 8 tasks of E72 (ADR-0086, per-directory
 AGENTS.md projection) are now shipped.**
 
-**Blocked -- infra, not code, needs founder input on one item (2026-09-05):**
+**Historical host-blocked account (2026-09-05; T70.8 source work resumed October 1):**
 T70.4 (#1699 nohup/disown vs. a genuinely dead launcher,
 `Kazi.Runtime.ParentMonitor`) and T70.8 (#1700 -- document the vitest `-t`
 predicate hazard) both failed a SECOND time even after raising

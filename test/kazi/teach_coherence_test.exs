@@ -137,10 +137,19 @@ defmodule Kazi.TeachCoherenceTest do
           Enum.flat_map(predicates, fn predicate ->
             args = Map.get(predicate, "args", [])
 
-            if Path.basename(predicate["cmd"]) == "kazi" do
-              [Enum.join(["kazi" | args], " ")]
-            else
-              Enum.filter(args, &Regex.match?(~r/\bkazi\s/, &1))
+            cond do
+              Path.basename(predicate["cmd"]) == "kazi" ->
+                [Enum.join(["kazi" | args], " ")]
+
+              Path.basename(predicate["cmd"]) == "mix" and
+                  match?(["kazi." <> _ | _], args) ->
+                [Enum.join(args, " ")]
+
+              true ->
+                Enum.flat_map(args, fn arg ->
+                  Regex.scan(~r/\bkazi(?:\s+|\.[a-z-]+\s+)[^;&|\n]*/, arg)
+                  |> Enum.map(&hd/1)
+                end)
             end
           end)
         else
@@ -431,6 +440,8 @@ defmodule Kazi.TeachCoherenceTest do
       for {cmd, args} <- [
             {"kazi", ["apply", "--turbo"]},
             {"/usr/local/bin/kazi", ["apply", "--turbo"]},
+            {"mix", ["kazi.apply", "--turbo"]},
+            {"sh", ["-c", "grep --line-number pattern file && kazi apply --turbo"]},
             {"sh", ["-c", "kazi apply --turbo"]}
           ] do
         doc = """
