@@ -16,6 +16,14 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [1.297.1](https://github.com/kazi-org/kazi/compare/v1.297.0...v1.297.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **teach:** disable color in exact Vitest output predicates ([60a789c](https://github.com/kazi-org/kazi/commit/60a789c2dcc5c76c36433586d03d4cb6aa41d651))
+* **teach:** require successful Vitest selection exit ([19867a5](https://github.com/kazi-org/kazi/commit/19867a57ee1d68b58a8aa351a17924fe4f01aba4))
+
 ## [1.297.0](https://github.com/kazi-org/kazi/compare/v1.296.1...v1.297.0) (2026-09-07)
 
 
