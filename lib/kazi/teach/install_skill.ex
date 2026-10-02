@@ -696,6 +696,32 @@ defmodule Kazi.Teach.InstallSkill do
     A task without a machine-checkable criterion contributes no predicate; its
     free-text acceptance criteria are simply not kazi-covered.
 
+    ## Scoping a `vitest -t` predicate on a multi-spec-file project
+
+    A `vitest run -t "<name>"` predicate asserting the aggregate summary reads
+    exactly `Tests  1 passed (1)` is unsatisfiable on any project with more
+    than one spec file: vitest collects every file matched by `test.include`
+    and marks non-matching tests `skipped`, so the summary includes those
+    skipped tests.
+
+    Assert the PER-TEST result line instead of the aggregate summary.
+    `--reporter=verbose` prints one line per test; `match_count` counts lines,
+    so require at least one matching passing line:
+
+    ```toml
+    cmd = "npx"
+    args = ["--no-install", "vitest", "run", "-t", "passes the target case", "--reporter=verbose"]
+    verdict = "match_count"
+    match_regex = "✓ .* > passes the target case"
+    pass_when = ">= 1"
+    ```
+
+    See `test/fixtures/vitest_authoring_pattern/` (a real two-spec-file
+    project where only one test matches this filter) and
+    `test/kazi/teach/authoring_vitest_pattern_test.exs`, which runs this exact
+    command and pattern against the fixture's real output and checks the
+    one-pass/two-skipped aggregate summary.
+
     ## Runtime introspection
 
     Confirm the payload shape against the live CLI before drafting:
