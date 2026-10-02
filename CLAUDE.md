@@ -7,6 +7,11 @@ predicates are objectively true, stuck, or over budget. It drives harnesses
 
 ## Read before changing anything
 
+For Sire/fleet/container strategy work, read the dated
+[recommendation on Kazi in a Sire-governed fleet](docs/kazi-in-a-sire-governed-fleet.md).
+It proposes a bounded convergence role and a supervision-focused evaluation;
+it does not supersede ADRs or authorize implementation or spending.
+
 - `docs/concept.md` -- canonical concept and architecture (source of truth).
 - `docs/adr/0001`..`0007` -- frozen decisions. Do NOT relitigate them in passing.
   To change a decision, write a superseding ADR.

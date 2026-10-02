@@ -5,6 +5,13 @@ acceptance predicates, and kazi drives a coding harness in a loop until those
 predicates are objectively true, stuck, or over budget. kazi is a TOOL you call,
 not a harness.
 
+## Sire fleet strategy
+
+For Sire/fleet/container strategy work, read the dated
+[recommendation on Kazi in a Sire-governed fleet](docs/kazi-in-a-sire-governed-fleet.md).
+It records the proposed ownership boundary and the next evaluation question,
+not a new architecture ruling or authorization to dispatch work.
+
 ## Drive kazi: MCP first, JSON-CLI fallback
 
 PREFER the MCP server. If you speak MCP, wire kazi as an MCP server and drive its
