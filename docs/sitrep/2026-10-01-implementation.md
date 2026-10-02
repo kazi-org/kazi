@@ -51,3 +51,13 @@ proposal, private handoff material, branch cleanup and optional UI changes are
 excluded. The 102-tip/490-branch inventory remains a review disposition,
 not authorization to delete refs. No paid evaluation or production deployment
 is required to qualify these changes.
+
+## Current-direction cleanup
+
+The roadmap and delivery summary now lead with the bounded Sire-governed role
+and the supervision-per-accepted-landed-change question. Old horizon narratives,
+release snapshots and execution schedules remain in Git history rather than
+current guidance. E75 is a brief deferred note; its old executable decomposition
+and T75.1 contract are removed from this change. Completed contracts are marked
+reference-only. Earlier model restrictions and study approval do not authorize
+future execution. Source implementation and deferred authored drafts are preserved.

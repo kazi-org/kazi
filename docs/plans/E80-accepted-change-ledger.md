@@ -1,5 +1,10 @@
 # E80 -- Attribute total effort to independently accepted changes
 
+This is a completed engineering delivery record. Checked task contracts and
+milestone logs preserve verification evidence, not a new assignment queue.
+Additional work follows the [current roadmap](../roadmap.md).
+
+
 Final status (2026-10-01): E80 source and distributed release verification are
 complete in Fanisi v0.1.0 ([Fanisi PR #5](https://github.com/kazi-org/fanisi/pull/5)). UC-075's ledger engineering is complete; the E77
 measurements still have incomplete receipt coverage and no operational landings,
@@ -61,7 +66,7 @@ never free by assumption. Private transcripts and provider IDs stay in ignored
 artifacts; commit synthetic fixtures only. Each implementation task includes its
 regression tests; no general agent framework, new dependencies or dashboard.
 
-## Progress Log
+## Historical delivery evidence
 
 2026 09 07: Added five executable Fanisi integration rows; accounting utilities already shipped are reused.
 

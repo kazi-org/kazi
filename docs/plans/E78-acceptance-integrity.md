@@ -1,5 +1,10 @@
 # E78 -- Qualify acceptance before paying for changes
 
+This is a completed engineering delivery record. Checked task contracts and
+milestone logs preserve verification evidence, not a new assignment queue.
+Additional work follows the [current roadmap](../roadmap.md).
+
+
 Final status (2026-10-01): E78 implementation and release verification are
 complete in the Kazi v1.297.0 consolidated downloaded-artifact suite
 ([PR #1848](https://github.com/kazi-org/kazi/pull/1848)). UC-073 is
@@ -79,7 +84,7 @@ valid idempotent goals: keep it opt-in. Existing proposal consumers need additiv
 schema tests. Maintainability is reviewed for scope, duplication, abstractions,
 dependency changes and removed tests; a test count alone is insufficient.
 
-## Progress Log
+## Historical delivery evidence
 
 2026 09 07: Added six executable acceptance-integrity rows; no implementation or certification claimed.
 

@@ -1,5 +1,10 @@
 # E79 -- Bound unsuccessful repair and preserve a useful handoff
 
+This is a completed engineering delivery record. Checked task contracts and
+milestone logs preserve verification evidence, not a new assignment queue.
+Additional work follows the [current roadmap](../roadmap.md).
+
+
 Final status (2026-10-01): E79 implementation and release verification are
 complete in the Kazi v1.297.0 consolidated downloaded-artifact suite
 ([PR #1848](https://github.com/kazi-org/kazi/pull/1848)). UC-074 is
@@ -51,7 +56,7 @@ dependency on optional orientation tuning. A low ceiling may reduce successful
 completion on hard tasks: evaluate it separately before adoption. Runtime limits,
 provider receipts and cross-run lineage remain distinct accounting concepts.
 
-## Progress Log
+## Historical delivery evidence
 
 2026 09 07: Planned four executable slices reusing existing retry and handoff machinery; defaults unchanged.
 
