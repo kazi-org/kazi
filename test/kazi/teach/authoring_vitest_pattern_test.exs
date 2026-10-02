@@ -25,6 +25,7 @@ defmodule Kazi.Teach.AuthoringVitestPatternTest do
     "provider" => :provider,
     "description" => :description,
     "cmd" => :cmd,
+    "env" => :env,
     "args" => :args,
     "verdict" => :verdict,
     "match_regex" => :match_regex,
@@ -74,8 +75,13 @@ defmodule Kazi.Teach.AuthoringVitestPatternTest do
     assert exit_predicate[:args] == matcher_predicate[:args]
     assert exit_predicate[:verdict] == "exit_zero"
 
-    matcher_predicate = Map.put(matcher_predicate, :env, Map.new(npm_env))
-    exit_predicate = Map.put(exit_predicate, :env, Map.new(npm_env))
+    assert matcher_predicate[:env] == %{"NO_COLOR" => "1", "FORCE_COLOR" => "0"}
+    assert exit_predicate[:env] == matcher_predicate[:env]
+
+    matcher_predicate =
+      Map.update!(matcher_predicate, :env, &Map.merge(Map.new(npm_env), &1))
+
+    exit_predicate = Map.update!(exit_predicate, :env, &Map.merge(Map.new(npm_env), &1))
 
     passing_matcher = CustomScript.evaluate_config(matcher_predicate, %{workspace: @fixture})
     passing_exit = CustomScript.evaluate_config(exit_predicate, %{workspace: @fixture})
