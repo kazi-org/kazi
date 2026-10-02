@@ -187,7 +187,10 @@ compact cause line (`Kazi.Loop.CauseClass.format/2`, e.g. `error_wedged
 (live_route: missing_url)`) -- the SAME formatter the drill-in view uses, so
 the two surfaces never disagree on how a cause reads. An empty fleet (or a
 fleet with nothing to flag) renders no attention row. See
-`Kazi.Attention.Queue` and `KaziWeb.MissionControlLive`.
+`Kazi.Attention.Queue` and `KaziWeb.MissionControlLive`. Current-view regression
+coverage in `test/kazi_web/live/stuck_escalation_panel_test.exs` checks cause
+details, drill-in links and cause-before-stuck ordering, plus a negative control
+that budget exhaustion remains a budget alert rather than a needs-human cause.
 
 ## The events sink (T46.2)
 
