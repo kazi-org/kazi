@@ -9,8 +9,8 @@ screen instead of reconstructing it from 70+ ADRs and 50+ epics. E45
 ("plan-as-generated-view") may eventually generate a view like this from plan
 data; until then it is hand-maintained under the contract at the bottom.
 
-Last updated: **2026-07-17** (at v1.153.0, ADRs through 0073, E55 wave A
-SHIPPED -- 7 tasks merged and released; waves B-D next).
+Last updated: **2026-10-01** (accepted-change delivery/evaluation record
+reconciled; see current status below).
 
 ## Where we came from
 
@@ -103,6 +103,36 @@ part of convergence), E45 (one-system planning), E49 (scenario pins), E52
 single tasks on E20/E25/E39.
 
 ## Where we are going
+
+**Completed engineering; measured residuals remain (2026 10 01):** E74/E76/
+E78/E79 shipped in Kazi v1.297.0; E80 shipped in Fanisi v0.1.0. UC-073 and
+UC-074 engineering is complete. UC-075's accounting and evaluation machinery
+is complete, while complete dollar coverage and operational landing outcomes
+remain unknown/unmeasured. E77's original and resumed cohorts are complete;
+neither supports a default-policy change or a universal capability claim.
+E75 remains deferred optional orientation tuning. See the current
+[delivery record](plans/accepted-change-delivery.md) and
+[evaluation](e77-evaluation-2026-09-08.md).
+
+**Historical plan (2026 09 07): make Kazi earn its overhead.** E78 closes proposal
+protection gaps and qualifies behavioral acceptance; E79 bounds repair across
+rungs and returns a compact handoff; E80 connects coordinator/reviewer effort
+and verified landing to Fanisi's ledger. E77 then specifies matched evaluation.
+Estimated new implementation effort is 20 hours plus review/release, using at
+most two implementers; see [delivery plan](plans/accepted-change-delivery.md).
+Core brief/usage fixes merged (#1839/#1838), but savings are not proved.
+Optional orientation tuning is deferred behind acceptance/accounting. This
+supersedes the ordering and unimplemented-fix statements in the older entry below.
+
+**Historical plan (2026 09 06): accepted-change economics, E74-E77.** First preserve the
+complete task at dispatch and correct usage aggregation; then scope optional
+orientation and distinguish estimates from provider receipts. Today these are
+bounded engineering candidates, not completed production fixes. This week target
+matched unfamiliar-task trials with independent review and all failed attempts
+counted. Quarter-scale routing/retrieval work is conditional on those results,
+not a commitment to a new platform. See [E74](plans/E74-dispatch-contract.md)
+for the evidence, proposed horizons, and [E77](plans/E77-accepted-change-evaluation.md)
+for the evaluation gate. Existing historical roadmap entries remain unchanged.
 
 **Shipped (2026-09-05, `/apply --pool`, three dispatches this day):** T69.9
 (#1681 `portfolio` in `Kazi.CLI.Schema`, PR #1740, `4b53f601` -> v1.277.0),
@@ -829,3 +859,7 @@ files, and ADRs rather than growing this file. Counts and epic states are
 derivable from `parse_plan.py` (`.claude/scratch/parsed-plan.json`) — regenerate
 them rather than trusting memory. This file must stay leak-clean (ADR-0034): no
 internal hosts, paths, or fleet/session names, ever.
+
+## Accepted-change delivery update (2026-10-01)
+
+E74/E76/E78/E79 are merged and verified through downloaded Kazi v1.297.0: 16 offline scenarios preserve the dispatch contract, acceptance protections, bounded repair and accounting across processes. Final accounting CI executed 5,063 passing cases. E80 shipped as Fanisi v0.1.0 with 18 downloaded-binary ledger checks and 90 race-enabled source cases. E77 completed its original cohort (2/3 accepted per arm; Kazi used about 20% more known provider dollars and 52% more wall time) and resumed follow-up (2/3 direct, 1/3 Kazi). Known provider spend was $0.13148736; unresolved conservative reserves total $5.811, and unallocated allowance is $4.06398734. The direct follow-up cost remains a lower bound because some requests lack receipts. No experimental candidate landed, so cost per accepted landing is undefined and the seven-day landing check did not begin. See the [evaluation report](e77-evaluation-2026-09-08.md). No default-policy change occurred. E75 remains deferred.
