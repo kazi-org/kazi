@@ -80,7 +80,7 @@ defmodule Kazi.Teach.AuthoringVitestPatternTest do
     passing_matcher = CustomScript.evaluate_config(matcher_predicate, %{workspace: @fixture})
     passing_exit = CustomScript.evaluate_config(exit_predicate, %{workspace: @fixture})
 
-    assert passing_matcher.status == :pass
+    assert passing_matcher.status == :pass, inspect(passing_matcher.evidence)
     assert passing_matcher.evidence.observed == 1
     assert passing_exit.status == :pass
     assert passing_exit.evidence.output =~ ~r/Tests\s+1 passed \| 2 skipped \(3\)/

@@ -8,5 +8,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["specs/**/*.spec.js"],
+    // Keep this tiny acceptance fixture bounded on shared CI runners.
+    pool: "threads",
+    poolOptions: { threads: { singleThread: true } },
   },
 });
