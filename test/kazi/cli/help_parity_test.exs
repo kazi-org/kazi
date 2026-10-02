@@ -54,6 +54,35 @@ defmodule Kazi.CLI.HelpParityTest do
              "(add a `kazi <command>` line to @usage): #{inspect(missing)}"
   end
 
+  # A registered long flag is documented only when the full flag appears as a
+  # token. For example, `--integration` must not pass because the usage happens
+  # to contain `--integration-command`.
+  defp flag_token_listed?(usage, token),
+    do: usage =~ ~r/(?<![\w-])#{Regex.escape(token)}(?![\w-])/
+
+  test "flag matching rejects a longer token with the same prefix" do
+    refute flag_token_listed?("--integration-command", "--integration")
+    assert flag_token_listed?("--integration --integration-command", "--integration")
+  end
+
+  test "every registered flag's long token is listed in the human usage" do
+    out = capture_io(fn -> assert Kazi.CLI.run(["help", "--json"]) == 0 end)
+    {:ok, payload} = Jason.decode(String.trim(out))
+    usage = human_usage()
+
+    missing =
+      for command <- payload["commands"],
+          %{"name" => token} <- command["flags"],
+          not flag_token_listed?(usage, token) do
+        {command["name"], token}
+      end
+      |> Enum.sort()
+
+    assert missing == [],
+           "these registered flags are missing from the human `kazi help` usage " <>
+             "(add an OPTIONS entry to @usage): #{inspect(missing)}"
+  end
+
   test "dashboard and spec are listed in the human usage (the drift these guard, ADR-0057/ADR-0050)" do
     usage = human_usage()
 
