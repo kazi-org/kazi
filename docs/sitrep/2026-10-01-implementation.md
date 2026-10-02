@@ -11,7 +11,8 @@ Source qualification is distinct from a release or installed-binary upgrade.
   landing outcomes remain incomplete. E75 remains optional and deferred.
 - Completed T70.8 with pinned Vitest 2.1.9 multi-spec fixtures and the real
   CustomScript provider. Exact-target output matching and exit-zero both
-  must hold. Negative controls cover target failure, selected sibling
+  must hold. Both predicates disable ANSI color to make CI output matchable,
+  and the fixture uses one worker. Negative controls cover target failure, selected sibling
   failure, and replacement of the exact target.
 - Ported the smaller help-parity experiment to the current registry. Human
   usage documents registered long flags; token-boundary and removed-flag

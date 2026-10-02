@@ -717,6 +717,7 @@ defmodule Kazi.Teach.InstallSkill do
     id = "vitest-target-passing-line"
     provider = "custom_script"
     description = "Vitest emits a passing result line for the exact target test."
+    env = { NO_COLOR = "1", FORCE_COLOR = "0" }
     cmd = "npx"
     args = ["--no-install", "vitest", "run", "-t", "passes the target case", "--reporter=verbose"]
     verdict = "match_count"
@@ -727,10 +728,14 @@ defmodule Kazi.Teach.InstallSkill do
     id = "vitest-selected-tests-exit-zero"
     provider = "custom_script"
     description = "The same Vitest invocation exits zero, so any other selected test failure fails acceptance."
+    env = { NO_COLOR = "1", FORCE_COLOR = "0" }
     cmd = "npx"
     args = ["--no-install", "vitest", "run", "-t", "passes the target case", "--reporter=verbose"]
     verdict = "exit_zero"
     ```
+
+    Both predicates disable ANSI color so CI output has the same matchable
+    line format as local output.
 
     See `test/fixtures/vitest_authoring_pattern/` (a real two-spec-file
     project where only one test matches this filter) and
