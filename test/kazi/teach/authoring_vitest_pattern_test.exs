@@ -17,7 +17,7 @@ defmodule Kazi.Teach.AuthoringVitestPatternTest do
   }
 
   test "the documented per-test matcher passes on a multi-spec Vitest project" do
-    task_tmp = Path.join(File.cwd!(), "tmp/kazi-triage-20261001-vitest")
+    task_tmp = Path.join(File.cwd!(), "tmp/vitest-authoring-cache")
     File.mkdir_p!(task_tmp)
 
     npm_env = [
