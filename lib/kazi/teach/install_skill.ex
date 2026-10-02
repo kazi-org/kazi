@@ -698,29 +698,45 @@ defmodule Kazi.Teach.InstallSkill do
 
     ## Scoping a `vitest -t` predicate on a multi-spec-file project
 
-    A `vitest run -t "<name>"` predicate asserting the aggregate summary reads
-    exactly `Tests  1 passed (1)` is unsatisfiable on any project with more
-    than one spec file: vitest collects every file matched by `test.include`
-    and marks non-matching tests `skipped`, so the summary includes those
-    skipped tests.
+    With the pinned Vitest 2.1.9 fixture's two spec files under
+    `test.include`, `vitest run -t "<name>"` still collects nonmatching
+    tests and reports them as `skipped`. The aggregate summary therefore
+    includes them, rather than taking the `Tests  1 passed (1)` shape. This
+    behavior is demonstrated for that fixture and version, not promised for
+    every Vitest version or project configuration.
 
-    Assert the PER-TEST result line instead of the aggregate summary.
-    `--reporter=verbose` prints one line per test; `match_count` counts lines,
-    so require at least one matching passing line:
+    Use two conjunctive predicates for a `-t` run. `match_count` checks for
+    the target's passing per-test line, while the companion `exit_zero`
+    predicate checks the same command's exit status. Both matter because
+    `match_count` can pass when the target passes but another selected test
+    fails. Anchor the target name at the end (allowing an optional duration) so
+    a similarly named sibling cannot satisfy the target check:
 
     ```toml
+    [[predicate]]
+    id = "vitest-target-passing-line"
+    provider = "custom_script"
+    description = "Vitest emits a passing result line for the exact target test."
     cmd = "npx"
     args = ["--no-install", "vitest", "run", "-t", "passes the target case", "--reporter=verbose"]
     verdict = "match_count"
-    match_regex = "✓ .* > passes the target case"
+    match_regex = "^\\\\s*✓ .* > passes the target case(?: \\\\(\\\\d+(?:\\\\.\\\\d+)?ms\\\\))?$"
     pass_when = ">= 1"
+
+    [[predicate]]
+    id = "vitest-selected-tests-exit-zero"
+    provider = "custom_script"
+    description = "The same Vitest invocation exits zero, so any other selected test failure fails acceptance."
+    cmd = "npx"
+    args = ["--no-install", "vitest", "run", "-t", "passes the target case", "--reporter=verbose"]
+    verdict = "exit_zero"
     ```
 
     See `test/fixtures/vitest_authoring_pattern/` (a real two-spec-file
     project where only one test matches this filter) and
-    `test/kazi/teach/authoring_vitest_pattern_test.exs`, which runs this exact
-    command and pattern against the fixture's real output and checks the
-    one-pass/two-skipped aggregate summary.
+    `test/kazi/teach/authoring_vitest_pattern_test.exs`, which evaluates both
+    predicates against the real fixture, a target-test failure, and a failure
+    in a second test selected by the same substring filter.
 
     ## Runtime introspection
 
