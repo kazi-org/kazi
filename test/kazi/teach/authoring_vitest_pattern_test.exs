@@ -133,6 +133,27 @@ defmodule Kazi.Teach.AuthoringVitestPatternTest do
     assert other_exit.evidence.output =~ ~r/Tests\s+.*\b1 passed\b/
     assert other_exit.evidence.output =~ ~r/Tests\s+.*\b1 failed\b/
     assert other_exit.evidence.output =~ ~r/2 skipped \(4\)/
+
+    absent_workspace =
+      Path.join(File.cwd!(), "tmp/vitest-absent-target-#{System.unique_integer([:positive])}")
+
+    File.cp_r!(@fixture, absent_workspace)
+    on_exit(fn -> File.rm_rf!(absent_workspace) end)
+    absent_spec = Path.join(absent_workspace, "specs/target.spec.js")
+
+    File.write!(
+      absent_spec,
+      String.replace(File.read!(absent_spec), @test_name, @test_name <> " but renamed")
+    )
+
+    absent_matcher =
+      CustomScript.evaluate_config(matcher_predicate, %{workspace: absent_workspace})
+
+    absent_exit = CustomScript.evaluate_config(exit_predicate, %{workspace: absent_workspace})
+
+    assert absent_matcher.status == :fail
+    assert absent_matcher.evidence.observed == 0
+    assert absent_exit.status == :pass
   end
 
   defp atomize_config(config) do
