@@ -1,5 +1,10 @@
 # kazi -- Build Plan (remaining work)
 
+October 1 triage implementation: T70.8 is source-qualified; help parity and
+LiveView regression coverage are added. See the
+[implementation record](sitrep/2026-10-01-implementation.md) for integration
+status and verification limitations.
+
 ## Context
 
 **Scoped update 2026 10 01:** E74, E76, E78 and E79 source/release work is
