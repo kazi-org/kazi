@@ -2,6 +2,18 @@
 
 ## Context
 
+**Scoped update 2026 10 01:** E74, E76, E78 and E79 source/release work is
+complete in Kazi v1.297.0; E80 source/release work is complete in Fanisi
+v0.1.0. E77's original matched pilot and resumed raised-allowance follow-up
+are complete. The measured cohorts found no reason to change defaults, leave
+unresolved provider-cost reserves, and produced zero operational landings.
+UC-073 and UC-074 are engineering-complete; UC-075's ledger/evaluation
+engineering is complete, while all-in cost and landed-change outcomes remain
+unknown or unmeasured. See the [delivery record](plans/accepted-change-delivery.md)
+and [evaluation](e77-evaluation-2026-09-08.md). E75 is deferred optional work.
+Historical context below is preserved; old release/test counts are not a
+current baseline.
+
 kazi is a reconciliation controller for software goals: declare a goal as
 machine-checkable predicates; kazi drives a coding agent in a loop until the
 predicates are objectively true, stuck, or over budget. It drives harnesses
@@ -298,6 +310,19 @@ Open work:
   executing once per feature -- the runtime complement to E40's author-time
   `kazi spec import`, ADR-0071) -- E62.
 
+- **UC-073** (P0, engineering COMPLETE): qualify genuine behavioral changes
+  and preserve their independent verification contract through goal files and
+  proposals -- E78. This is source/release qualification, not paid-model
+  certification.
+- **UC-074** (P0, engineering COMPLETE): bound unsuccessful dispatches across
+  a run and hand off reproducible evidence without replaying the full
+  transcript -- E79. This is source/release qualification, not paid-model
+  certification.
+- **UC-075** (P0, engineering COMPLETE; measured outcome PARTIAL): record
+  attributable effort and review/landing evidence -- E80/E77. The completed
+  cohorts still lack complete dollar coverage and operational landing outcomes;
+  cost per landed change is undefined.
+
 ## Checkable Work Breakdown
 
 The WBS below is the single checkable source of truth; toggle `[ ]` to `[x]`.
@@ -359,6 +384,20 @@ their narrative lives in the ADRs and `docs/devlog.md`.
 ### E72 -- Per-directory AGENTS.md projection and `write_paths` as declared scope (ADR-0086) -> plans/E72.md
 
 ### E73 -- Scheduling boundary: shared_paths lease keys, --dag export, single_node refusal, contract lint (ADR-0087) -> plans/E73.md
+
+### E74 -- Preserve the declared task at the harness boundary -> plans/E74-dispatch-contract.md (3/3)
+
+### E75 -- Scope optional orientation and measure its size -> plans/E75-bounded-orientation.md (0/3)
+
+### E76 -- Reconcile usage and distinguish estimated from provider cost -> plans/E76-truthful-accounting.md (4/4)
+
+### E77 -- Measure accepted-change economics on unfamiliar tasks -> plans/E77-accepted-change-evaluation.md (6/6)
+
+### E78 -- Qualify acceptance before paying for changes -> plans/E78-acceptance-integrity.md (6/6)
+
+### E79 -- Bound unsuccessful repair and preserve a useful handoff -> plans/E79-bounded-repair.md (4/4)
+
+### E80 -- Attribute total effort to independently accepted changes -> plans/E80-accepted-change-ledger.md (5/5)
 
 ## Risk Register
 
@@ -464,6 +503,10 @@ stage only YOUR files (`git add <paths>`) so a sibling session's uncommitted WIP
 never swept into your commit.
 
 ## Progress Log
+
+- 2026 09 07: Added E78-E80 (15 engineering rows with acc), refined E77 dependencies, added ADR-0089 and three task contracts; preserved prior status and unrelated WIP.
+
+- 2026 09 06: Added E74-E77: 10 engineering rows with acc predicates and one deferred evaluation planning row; reused existing ADRs; preserved unrelated active and completed work.
 
 - 2026-09-03 (third touch, same refinement pass): T70.13/#1705 ticked
   `[x]` in plans/E70.md -- PR #1706 (ADR-0084, bus-hook opt-in gate) merged
