@@ -945,12 +945,12 @@ defmodule Kazi.CLI do
       --allowed-tools <list> Claude tool allow-list, comma- or space-separated.
       --context-store <name> Context provider used for dispatch context.
       --context-budget <N>   Maximum bytes of retrieved context for dispatch.
-      --session-name <name>  Label this run and its bus presence.
-      --allow-primary-workspace  Permit applying directly to a primary worktree.
+      --session-name <name>  Label the driving session in the run registry.
+      --allow-primary-workspace  Permit a primary-worktree root as --workspace.
       --allow-duplicate-run  Permit another live run of this same goal.
       --allow-workspace-collision  Permit another live goal in this workspace.
       --no-preflight         Skip dispatchability and landing preflight checks.
-      --node-sha <sha>       Require the rendered scoped node to match this SHA-256.
+      --node-sha <sha>       With --check, require the scoped node to match this SHA-256.
       --cwd <path>           Launch the harness from this path inside the workspace.
       --resume-pr <number>   Continue against a PR recorded by an earlier run.
       --integration <mode>   Override landing mode: none, commit, branch, pr, merge.
