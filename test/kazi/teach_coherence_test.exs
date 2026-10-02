@@ -113,6 +113,7 @@ defmodule Kazi.TeachCoherenceTest do
   defp referenced_flags(doc) do
     doc
     |> code_contexts()
+    |> Enum.flat_map(&flag_contexts/1)
     |> Enum.flat_map(fn ctx ->
       @flag_ref
       |> Regex.scan(ctx)
@@ -122,6 +123,35 @@ defmodule Kazi.TeachCoherenceTest do
   end
 
   # T42.3 (ADR-0052): the PROSE of the doc — everything OUTSIDE a code context.
+  # Predicate examples can invoke external tools. Their literal argv flags
+  # belong to that executable, not Kazi. Keep Kazi executables and embedded Kazi
+  # shell invocations in scope; malformed/unrecognized examples stay unfiltered.
+  defp flag_contexts(ctx) do
+    case Toml.decode(ctx) do
+      {:ok, %{"predicate" => predicates}} when is_list(predicates) ->
+        if Enum.all?(predicates, fn predicate ->
+             is_map(predicate) and is_binary(predicate["cmd"]) and
+               is_list(Map.get(predicate, "args", [])) and
+               Enum.all?(Map.get(predicate, "args", []), &is_binary/1)
+           end) do
+          Enum.flat_map(predicates, fn predicate ->
+            args = Map.get(predicate, "args", [])
+
+            if Path.basename(predicate["cmd"]) == "kazi" do
+              [Enum.join(["kazi" | args], " ")]
+            else
+              Enum.filter(args, &Regex.match?(~r/\bkazi\s/, &1))
+            end
+          end)
+        else
+          [ctx]
+        end
+
+      _ ->
+        [ctx]
+    end
+  end
+
   # The inverse of `code_contexts/1`: fenced blocks and inline spans are blanked,
   # leaving the narrative a reader actually acts on.
   #
@@ -382,6 +412,40 @@ defmodule Kazi.TeachCoherenceTest do
 
       assert_raise ExUnit.AssertionError, ~r/frobnicate/, fn ->
         assert_coherent(tampered, cli_surface(), "tampered SKILL.md")
+      end
+    end
+
+    test "external predicate flags are not mistaken for Kazi flags" do
+      doc = """
+      ```toml
+      [[predicate]]
+      cmd = "npx"
+      args = ["--no-install", "vitest", "--reporter=verbose"]
+      ```
+      """
+
+      assert referenced_flags(doc) == []
+    end
+
+    test "Kazi flags in predicates and embedded shell commands still reject typos" do
+      for {cmd, args} <- [
+            {"kazi", ["apply", "--turbo"]},
+            {"/usr/local/bin/kazi", ["apply", "--turbo"]},
+            {"sh", ["-c", "kazi apply --turbo"]}
+          ] do
+        doc = """
+        ```toml
+        [[predicate]]
+        cmd = #{Jason.encode!(cmd)}
+        args = #{Jason.encode!(args)}
+        ```
+        """
+
+        assert referenced_flags(doc) == ["--turbo"]
+
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_coherent(doc, cli_surface(), "fixture")
+        end
       end
     end
 
