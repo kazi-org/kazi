@@ -735,8 +735,9 @@ defmodule Kazi.Teach.InstallSkill do
     See `test/fixtures/vitest_authoring_pattern/` (a real two-spec-file
     project where only one test matches this filter) and
     `test/kazi/teach/authoring_vitest_pattern_test.exs`, which evaluates both
-    predicates against the real fixture, a target-test failure, and a failure
-    in a second test selected by the same substring filter.
+    predicates against the real fixture, a target-test failure, a failure
+    in a second test selected by the same substring filter, and a passing
+    similarly named replacement with the exact target absent.
 
     ## Runtime introspection
 
