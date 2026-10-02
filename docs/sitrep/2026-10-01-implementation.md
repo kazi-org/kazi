@@ -1,6 +1,6 @@
 # October 1 triage implementation
 
-Status: implemented on `task/triage-20261001`, pending integration checks.
+Status: implemented on `task/triage-20261001`; [PR #1859](https://github.com/kazi-org/kazi/pull/1859) is open for review and CI.
 Source qualification is distinct from a release or installed-binary upgrade.
 
 ## Implemented
@@ -30,8 +30,13 @@ Help and attention-cause mutation controls failed as expected and passed after
 restoration. Formatting, whitespace, public-content leak, attribution,
 docs-with-code and documented-command checks passed.
 
-The first broad run was invalidated by a temporary directory inside Git and
-Unix socket path length. A rerun uses a short SSD directory outside Git.
+The corrected broad local run passed 5,065 tests and doctests with 124 exclusions.
+The initial run was invalidated by a temporary directory inside Git and Unix
+socket path length; a Git fixture also inherited the parent repository and
+opened a PR with test-generated metadata. The PR was retained for this
+implementation and its title/body corrected. The rerun used a short SSD
+directory outside Git. Final coherence verification passed 24 tests, including
+Mix-wrapper and mixed-shell regression cases.
 The local macOS daemon-reregister module assumes no installed LaunchAgent;
 this host has one, so it is excluded from the local rerun and retained
 unchanged for Linux CI. No host configuration was removed or reconfigured.
