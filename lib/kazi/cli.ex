@@ -937,6 +937,36 @@ defmodule Kazi.CLI do
                              back into a dispatch prompt -- purely advisory
                              until the T48.12 benchmark gate measures a real
                              win.
+
+  COMMAND-SPECIFIC OPTIONS:
+      `apply`:
+      --effort <level>       Claude harness reasoning effort (low / medium / high).
+      --permission-mode <mode>  Claude permission mode (default auto).
+      --allowed-tools <list> Claude tool allow-list, comma- or space-separated.
+      --context-store <name> Context provider used for dispatch context.
+      --context-budget <N>   Maximum bytes of retrieved context for dispatch.
+      --session-name <name>  Label this run and its bus presence.
+      --allow-primary-workspace  Permit applying directly to a primary worktree.
+      --allow-duplicate-run  Permit another live run of this same goal.
+      --allow-workspace-collision  Permit another live goal in this workspace.
+      --no-preflight         Skip dispatchability and landing preflight checks.
+      --node-sha <sha>       Require the rendered scoped node to match this SHA-256.
+      --cwd <path>           Launch the harness from this path inside the workspace.
+      --resume-pr <number>   Continue against a PR recorded by an earlier run.
+      --integration <mode>   Override landing mode: none, commit, branch, pr, merge.
+      --integration-command <path>  Executable hook for in-place PR/merge landing.
+      --strict-landing       Return failure when converged work fails to land.
+      `plan`:
+      --session-name <name>  Label the drafted proposal and later run.
+      --tree                 `plan render` only: write scoped AGENTS.md goal nodes.
+      `daemon start`:
+      --nats-host <host>     Connect to an existing NATS server instead of starting one.
+      --nats-token <token>   Authenticate to the session bus NATS server.
+      `bus board`:
+      --attention            Show only sessions waiting for operator attention.
+      `bus prune`:
+      --prefix <prefix>      Remove live fact topics beginning with this prefix.
+
       --help, -h             Show this help and exit.
       --version, -v          Print the kazi version and exit.
 
