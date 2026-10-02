@@ -42,11 +42,17 @@ predicates are objectively true, stuck, or over budget. It drives harnesses
 - **E7** (registry adapter) was built then WITHDRAWN before release (ADR-0015):
   its `capabilities.json` input was bespoke and did not generalize.
 
-**State of `main`: 899 tests pass** (68 doctests, 831 tests), 19 excluded
-(`:nats`/`:graphify`/`:opencode_live` tags); `mix format --check-formatted` +
-`mix compile --warnings-as-errors` clean. Latest release: **v0.3.0** (brew).
+### Historical baseline: v0.3.0
 
-**Open work (the entire content of this plan):**
+The following test/release state and open-work list are preserved from the
+original v0.3.0 plan snapshot; they are not current `main` status or backlog.
+
+**State of `main` at the v0.3.0 baseline: 899 tests pass** (68 doctests, 831
+tests), 19 excluded (`:nats`/`:graphify`/`:opencode_live` tags);
+`mix format --check-formatted` + `mix compile --warnings-as-errors` clean.
+Latest release at that point: **v0.3.0** (brew).
+
+**Open work in the v0.3.0 snapshot (historical):**
 
 - **E9 leftovers** -- T9.5 (Playwright smoke), T9.6 (perf/a11y/OG image).
 - **E12** -- hierarchical predicate grouping + Obsidian/Mermaid export (ADR-0020).
@@ -70,12 +76,13 @@ workflow). **E12 -> E13** (the grouping + intended-vs-actual thesis) and **E14**
 source of truth) and ADRs `0001`..`0024`. To change a decision, write a superseding
 ADR.
 
-## Use Case Summary
+## Historical Use Case Summary (v0.3.0 plan snapshot)
 
 All use cases are tracked in `.claude/scratch/usecases-manifest.json`. **UC-001..
 UC-029 are DELIVERED and verified on `main`** (incl. UC-024 brew install, UC-026/
 UC-027 multi-harness, UC-028 website [live], UC-029 interactive propose [v0.3.0]).
-Open work:
+Open work in that snapshot (historical; descriptions below are preserved from
+the original plan and do not represent the current backlog):
 
 - **UC-028** (public website) -- LIVE; only T9.5/T9.6 polish remain (E9).
 - **UC-030** (hierarchical predicate grouping via a declared taxonomy +
@@ -309,6 +316,8 @@ Open work:
   verdicts from ANY test runner via runner-agnostic cucumber-json, the runner
   executing once per feature -- the runtime complement to E40's author-time
   `kazi spec import`, ADR-0071) -- E62.
+
+### Current accepted-change use cases (2026-10-01)
 
 - **UC-073** (P0, engineering COMPLETE): qualify genuine behavioral changes
   and preserve their independent verification contract through goal files and

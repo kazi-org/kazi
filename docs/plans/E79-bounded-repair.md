@@ -20,26 +20,26 @@ changed filenames. See ADR-0061, ADR-0045 and ADR-0089.
 
 ### Wave 1: Total allowance (1 agent)
 
-- [x] T79.1 Add an opt-in run-wide dispatch ceiling. Owner: pool Est: 90m lane: agent verifies: [UC-074] deps: [] acc: [With budget.max_total_dispatches set to two, a fake harness is launched at most twice across all declared ladder rungs, including failed launches.]
+- [x] T79.1 Add an opt-in run-wide dispatch ceiling. Owner: pool Est: 90m lane: agent verifies: [UC-074] deps: [] acc: [With budget.max_total_dispatches set to two, a fake harness is launched at most twice across all declared ladder rungs, including failed launches.]  Done: 2026-09-07 (final source merge, PR #1842)
   - Scope: `lib/kazi/budget.ex`, `lib/kazi/goal/loader.ex`, `lib/kazi/authoring.ex`, `lib/kazi/loop/budget.ex`, `lib/kazi/loop.ex`, `lib/kazi/loop/ladder.ex`; budget/loader/authoring/ladder tests. Preserve the new budget field through proposal persistence too. Contract: `docs/tasks/T79.1.md`.
   - This proposed field is additional to per-rung max_dispatches. Absent means unchanged behavior. Check the cumulative counter before launching, preserve it across rung changes, and expose the stopping dimension. Observation ticks do not consume dispatch allowance. A worker timeout or error does; verification after the last allowed dispatch still runs and may converge.
   - A separate apply invocation is a separate run; cross-run repair allowance belongs to Fanisi lineage. Never claim this bounds hidden model calls inside the harness. Keep provider/model pinning independent; no Anthropic model escalation for this study.
 
 ### Wave 2: Evidence for the next repair (1 agent)
 
-- [x] T79.2 Extend the existing stuck bundle with reproducible attempt identity. Owner: pool Est: 90m lane: agent verifies: [UC-074] deps: [T79.1] acc: [A stopped run reports base/candidate identity, total dispatches, stop reason, failing IDs, verification refs and the complete contract reference within its configured bundle byte limit.]
+- [x] T79.2 Extend the existing stuck bundle with reproducible attempt identity. Owner: pool Est: 90m lane: agent verifies: [UC-074] deps: [T79.1] acc: [A stopped run reports base/candidate identity, total dispatches, stop reason, failing IDs, verification refs and the complete contract reference within its configured bundle byte limit.]  Done: 2026-09-07 (final source merge, PR #1842)
   - Scope: `lib/kazi/context/stuck_bundle.ex`, `lib/kazi/memory/attempt_ledger.ex`, `lib/kazi/loop.ex`, related tests. Reuse artifact storage/redaction; no second transcript database.
   - Keep mandatory task text in its immutable artifact; the bounded bundle links to it rather than truncating requirements. Include measured patch identity, verification changes and repeated-attempt fingerprints. Mark absent workspace/evidence unknown. Touched files alone do not establish progress. Preserve no-progress, graded-improvement, transient-live and quarantine behavior.
   - Test long multibyte diagnostics, missing artifacts, repeated attempts, changed patch with unchanged failures, secret redaction and deterministic byte bounds. An inaccessible reference must be diagnosed, not presented as a usable handoff.
 
 ### Wave 3: Test the policy through real entry points (1 agent)
 
-- [x] T79.3 Add an opt-in one-attempt-plus-one-repair recipe. Owner: pool Est: 60m lane: agent verifies: [UC-074] deps: [T79.2] acc: [A synthetic stalled task stops after two launches and its public JSON handoff supports a fresh-session repair without re-reading the original transcript.]
+- [x] T79.3 Add an opt-in one-attempt-plus-one-repair recipe. Owner: pool Est: 60m lane: agent verifies: [UC-074] deps: [T79.2] acc: [A synthetic stalled task stops after two launches and its public JSON handoff supports a fresh-session repair without re-reading the original transcript.]  Done: 2026-09-07 (final source merge, PR #1842)
   - Scope: `docs/orchestrator-recipe.md`, new `test/kazi/cli/bounded_repair_test.exs`, existing `test/kazi/loop/escalation_ladder_test.exs` and stuck-bundle tests.
   - Exercise goal-file and approved-proposal paths; validate field propagation, check-only behavior, and the legacy no-field case. Cover a successful second attempt, two failures, setup failure, observation-only ticks, and a ladder that would otherwise renew the budget.
   - This is an experimental recipe, not a default flip. Human/agent escalation means a compact handoff; do not automatically buy an expert model or start an outer retry loop. Repeated semantic mistakes identified by review require an amended brief or focused repair, not another invisible retry.
 
-- [x] T79.4 Validate and ship bounded repair. Owner: pool Est: 60m lane: agent verifies: [UC-074, infrastructure] deps: [T79.3] acc: [Source and isolated installed-CLI fixtures confirm the two-launch ceiling and complete handoff, and the released version repeats the fixture.]
+- [x] T79.4 Validate and ship bounded repair. Owner: pool Est: 60m lane: agent verifies: [UC-074, infrastructure] deps: [T79.3] acc: [Source and isolated installed-CLI fixtures confirm the two-launch ceiling and complete handoff, and the released version repeats the fixture.]  Done: 2026-09-07 (final downloaded-artifact gate, Kazi v1.296.0)
   - Run `MIX_ENV=test TEST_SERVER=false mix test test/kazi/loop/budget_test.exs test/kazi/loop/escalation_ladder_test.exs test/kazi/loop/stuck_detector_test.exs test/kazi/loop/stuck_bundle_test.exs test/kazi/context/stuck_bundle_test.exs test/kazi/memory/attempt_ledger_test.exs test/kazi/cli/bounded_repair_test.exs`; include any new loader/budget cases. Formatter, compile warnings, diff check and normal isolated CI are required.
   - Follow E78's isolated install, review and distributed-release smoke. Record actual launch counts and deliberately disable the ceiling once to show the fixture detects a third launch.
 

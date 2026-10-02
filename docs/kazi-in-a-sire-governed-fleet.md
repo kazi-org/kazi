@@ -1,9 +1,9 @@
 # Kazi in a Sire-governed coding fleet
 
 Status: recommendation, 2026-09-08. Written after the E77 evaluation and a
-review of HQ's fleet strategy. This is not a new architecture ruling, an
+limited private integration review. This is not a new architecture ruling, an
 approved implementation plan, or authorization for more paid experiments.
-Existing ADRs and HQ's sequencing gates remain in force.
+Existing ADRs and the integration's sequencing gates remain in force.
 
 ## Recommendation
 
@@ -49,19 +49,20 @@ The [Kazi entrypoint plan](plans/E-KAZI-ENTRYPOINT.md) describes the concrete
 lane integration; use its current task status rather than treating this note
 as a second backlog.
 
-HQ's `designs/sire-workhorse-spec.md` section 4.4 explicitly retains Kazi as a
-convergence workload while retiring its fleet bus and boards. HQ's
-`docs/plan.md` E7 specifies the governed container entrypoint and its sequencing
-hold. Sire's `docs/adr/0136-fleetd-node-agent-and-where-the-control-plane-runs.md`
-assigns the control plane job lifecycle, leases and reconciliation, and separates
-agent-reported state from evidence about outcomes.
+The ownership recommendation also reflects a limited private integration
+review summarized below: the reviewed design keeps Kazi as a convergence
+workload, places governed container entrypoint work behind sequencing gates,
+and assigns job lifecycle and lease reconciliation to the surrounding control
+plane. The public Kazi ADRs linked above remain the source references for Kazi's
+own boundary.
 
-At inspection on 2026-09-08, HQ's governed-entrypoint uptake rows were still
-unchecked, and `jobs/session-container/entrypoint.sh` still ran the harness
-before a post-hoc Kazi check. Kazi's local CLI already exposed single-node,
-lane-contract and integration-command controls. This is a dated checkout
-observation, not proof of deployment status. Recheck those sources before
-implementation, including HQ's required uptake/QA and architecture-review gates.
+At inspection on 2026-09-08, governed-entrypoint uptake rows in the reviewed
+private material were still unchecked, and the reviewed container entrypoint
+still ran the harness before a post-hoc Kazi check. Kazi's local CLI already
+exposed single-node, lane-contract and integration-command controls. This is a
+dated, limited private integration observation, not proof of deployment status.
+Recheck current integration artifacts and required uptake, QA and
+architecture-review gates before implementation.
 
 ## What E77 establishes
 
