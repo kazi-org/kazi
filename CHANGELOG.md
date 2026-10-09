@@ -16,6 +16,17 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [2.0.0](https://github.com/kazi-org/kazi/compare/v1.297.1...v2.0.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove session bus in favour of Ajent
+
+### Features
+
+* remove session bus in favour of Ajent ([0076fb1](https://github.com/kazi-org/kazi/commit/0076fb1aef820099fd169daa4504e31093a85307))
+
 ## [1.297.1](https://github.com/kazi-org/kazi/compare/v1.297.0...v1.297.1) (2026-10-02)
 
 
