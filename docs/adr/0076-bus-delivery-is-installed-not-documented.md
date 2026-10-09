@@ -1,5 +1,7 @@
 # ADR 0076: Bus delivery is installed, not documented — an opt-in turn-boundary hook
 
+> Superseded for the session bus on 2026-10-04: kazi messaging was removed in favour of [Ajent](../ajent.md). This document records the historical implementation.
+
 ## Status
 Accepted
 

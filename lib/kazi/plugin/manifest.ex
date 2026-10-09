@@ -1,51 +1,5 @@
 defmodule Kazi.Plugin.Manifest do
-  @moduledoc """
-  Renders the `kazi` Claude Code plugin bundle from the SAME single sources of
-  truth the explicit installers use (T61.3, ADR-0077).
-
-  A Claude Code plugin (docs: the plugins reference) is a self-contained
-  directory whose `.claude-plugin/plugin.json` manifest bundles skills, an MCP
-  server registration, and hook declarations in ONE installable, marketplace-
-  updatable artifact. ADR-0077 makes this an ADDITIONAL distribution channel,
-  lockstep-versioned with the binary release; the explicit
-  `install-skill`/`init --with-mcp`/`install-hooks` commands stay unchanged.
-
-  This module is a pure RENDERING step over the existing renderers -- it never
-  duplicates teaching or config logic:
-
-    * the skill content comes verbatim from `Kazi.Teach.InstallSkill.docs/0`
-      (`SKILL.md` + `AUTHORING.md` + `RECIPES.md`, the ADR-0074 functions),
-      written under `skills/kazi/` so Claude Code's default `skills/` scan
-      discovers it under the stable frontmatter name `kazi`;
-    * the MCP server entry is `Kazi.MCP.ClientConfig.server_entry/0` under the
-      key `Kazi.MCP.ClientConfig.server_name/0` -- byte-for-byte the shape
-      `init --with-mcp` writes into a repo's `.mcp.json` (ADR-0044);
-    * the hook declarations are `Kazi.Teach.InstallHooks.hook_commands/0` -- the
-      exact `{event, command}` set `install-hooks` registers (T55.9/ADR-0076),
-      rendered in the plugin's inline `hooks` shape.
-
-  If the manifest ever needs content a renderer does not produce, the RENDERER
-  is extended -- never this module.
-
-  ## `LOCAL.md` is deliberately NOT bundled (ADR-0077 decision 3)
-
-  A plugin update replaces the skill directory wholesale, so the operator-owned
-  `LOCAL.md` must never live inside the bundle. `InstallSkill.docs/0` already
-  excludes `LOCAL.md` (it lives at the stable `~/.claude/skills/kazi/LOCAL.md`
-  path, ADR-0077), so bundling exactly `docs/0` is what keeps operator
-  customization out of the replaced directory. This module asserts nothing new
-  here; it simply never writes `LOCAL.md`.
-
-  ## Deterministic (acceptance)
-
-  Everything is a pure function of the version string plus the frozen renderer
-  output -- no timestamps, no randomness, no clock. The same version yields a
-  byte-identical bundle, which `mix kazi.plugin` and the release pipeline
-  (T61.4) rely on so the published manifest is reproducible.
-  """
-
   alias Kazi.MCP.ClientConfig
-  alias Kazi.Teach.InstallHooks
   alias Kazi.Teach.InstallSkill
 
   # The plugin's kebab-case identifier (used for namespacing components). Kept
@@ -63,7 +17,7 @@ defmodule Kazi.Plugin.Manifest do
   @description "Drive kazi -- an outer-loop reconciliation controller that " <>
                  "converges a software goal to machine-checkable acceptance " <>
                  "predicates -- from Claude Code: the kazi skill, the kazi MCP " <>
-                 "server, and the session-bus hooks in one install."
+                 "server in one install."
   @keywords ["kazi", "reconciliation", "predicates", "agent", "mcp"]
 
   # The plugin subdirectory the skill content is written under. Claude Code's
@@ -94,9 +48,7 @@ defmodule Kazi.Plugin.Manifest do
       just-built release tag so the plugin version IS the binary version
       (ADR-0077 lockstep). Tests pass a fixed value for determinism.
 
-  The `mcpServers` and `hooks` values are rendered from `ClientConfig` and
-  `InstallHooks` respectively, so they can never drift from what the explicit
-  installers write.
+  The `mcpServers` value is rendered from `ClientConfig`.
   """
   @spec manifest(keyword()) :: map()
   def manifest(opts \\ []) do
@@ -113,8 +65,7 @@ defmodule Kazi.Plugin.Manifest do
       "repository" => @repository,
       "license" => @license,
       "keywords" => @keywords,
-      "mcpServers" => mcp_servers(),
-      "hooks" => hooks()
+      "mcpServers" => mcp_servers()
     }
   end
 
@@ -135,19 +86,6 @@ defmodule Kazi.Plugin.Manifest do
   """
   @spec mcp_servers() :: map()
   def mcp_servers, do: %{ClientConfig.server_name() => ClientConfig.server_entry()}
-
-  @doc """
-  The inline `hooks` block, rendered from `InstallHooks.hook_commands/0` -- the
-  same `{event, command}` registrations `install-hooks` writes (T55.9). Each
-  event maps to a one-entry list carrying a single `command` hook, matching the
-  installer's per-event shape.
-  """
-  @spec hooks() :: map()
-  def hooks do
-    for {event, command} <- InstallHooks.hook_commands(), into: %{} do
-      {event, [%{"hooks" => [%{"type" => "command", "command" => command}]}]}
-    end
-  end
 
   @doc """
   The full plugin bundle as an ordered list of `{relative_path, content}` pairs:

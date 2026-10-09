@@ -56,7 +56,6 @@ defmodule Kazi.Runtime do
 
   alias Kazi.Harness.ChildSupervisor
   alias Kazi.ReadModel.{HeartbeatTicker, Iteration, RunRegistry}
-  alias Kazi.Runtime.BusMirror
   alias Kazi.Runtime.ParentMonitor
   alias Kazi.Sink.Events, as: EventsSink
 
@@ -594,10 +593,6 @@ defmodule Kazi.Runtime do
         Kazi.ReadModel.RunRegistry.record_qualification(run_id, qualification)
       end
 
-      # T51.5 (ADR-0067 point 1): mirror the run START onto the bus, best-effort.
-      # Fire-and-forget by construction -- never blocks or alters the run.
-      BusMirror.started(goal_ref, run_id, Keyword.get(opts, :session_name))
-
       with {:ok, loop} <- Loop.start_link(loop_opts) do
         # T31: start the heartbeat ticker (a supervised periodic timer that advances
         # the heartbeat_at timestamp every ~30 seconds, independent of loop iterations).
@@ -626,11 +621,6 @@ defmodule Kazi.Runtime do
         # default `:infinity` a real multi-hour run relies on).
         result = await_loop_terminal(loop, await_timeout, startup_timeout_ms)
         Loop.stop(loop)
-
-        # T51.5 (ADR-0067 point 1): mirror the TERMINAL verdict onto the bus,
-        # best-effort. Bounded-synchronous so the verdict lands before a one-shot
-        # `kazi apply` process exits; swallows a downed daemon.
-        BusMirror.terminal(goal_ref, run_id, Keyword.get(opts, :session_name), result)
 
         Kazi.Runtime.Finalizer.finalize(result, run_id, persist?, signal_trap)
         stop_parent_monitor(parent_monitor)
@@ -1215,38 +1205,11 @@ defmodule Kazi.Runtime do
   # Persistence (read-model projection, T0.9)
   # =============================================================================
 
-  # Build the loop's :on_iteration side-effect callback that projects each
-  # observed iteration into the SQLite read-model. Always returns a 1-arity fn:
-  # the T51.5 bus-mirror effect is unconditional (a non-persisted fixture loop
-  # still projects live progress onto the bus), so the seam never degrades to
-  # nil.
-  #
-  # T15.4 (ADR-0023 decision 3): an optional `:stream` callback is COMPOSED here
-  # over the persistence projection — the loop fires ONE `on_iteration` per
-  # observation, so both the read-model write and the streaming JSONL emit happen
-  # on that single seam. The stream observer runs FIRST (so an event is emitted
-  # even when persistence is off / fails), then the read-model projection. Both
-  # are side-effect only; a raising stream callback is contained here so it never
-  # alters convergence or blocks the projection.
-  #
-  # T46.1 (ADR-0057): the run registry's heartbeat is composed onto the SAME seam,
-  # gated by the same `persist?` flag as the iteration projection — "persistence
-  # off" means the run touches no read-model table, registry included.
-  #
-  # T46.2 (ADR-0057 decision 3): the events sink append is likewise composed onto
-  # this seam, INSIDE `persist_iteration/3` — it fires only after the read-model
-  # write succeeds, so a sink line and its read-model row are built from the SAME
-  # inserted `Kazi.ReadModel.Iteration` struct and can never disagree.
+  # Stream observations first, then persist local run evidence and heartbeats.
   defp build_on_iteration(goal, opts, run_id, persist?, events_sink_path) do
     stream = Keyword.get(opts, :stream)
     goal_ref = Keyword.get(opts, :goal_ref, goal.id)
-    session_name = Keyword.get(opts, :session_name)
 
-    # The iteration side-effects, composed in a fixed order: the streaming
-    # observer first, then the read-model projection, then the T51.5 bus mirror
-    # LAST so a mirror post can never precede or perturb persistence. The mirror
-    # is always present (detached + fully swallowed, ADR-0067 point 1), so even a
-    # non-persisted fixture loop projects live progress onto the bus.
     effects =
       [
         is_function(stream, 1) && fn payload -> run_stream_observer(stream, payload) end,
@@ -1257,8 +1220,7 @@ defmodule Kazi.Runtime do
             record_harness_pid(run_id, payload)
             persist_iteration(goal_ref, payload, events_sink_path)
             persist_debrief(run_id, goal_ref, payload)
-          end,
-        fn payload -> BusMirror.iteration(goal_ref, run_id, session_name, payload) end
+          end
       ]
       |> Enum.filter(&is_function(&1, 1))
 
@@ -1935,15 +1897,6 @@ defmodule Kazi.Runtime do
 
   defp normalize_startup_timeout_ms(_unset), do: @default_startup_timeout_ms
 
-  # Tag the FIRST projected observation (iteration 0) so the bounded startup
-  # wait in `await_first_observation/3` learns the loop completed an observe
-  # pass. The payload's 0-based iteration index is 0 only for the first
-  # projected observation (the stuck-stop projection reuses the LAST index,
-  # which is 0 only when that observation WAS the first — still a completed
-  # observation). Mailbox-only, exactly once per run, side-effect free; the
-  # composed persistence/stream/mirror effects run unchanged after it.
-  # (`build_on_iteration/5` always returns a 1-arity fn — the bus-mirror effect
-  # is unconditional — so there is no nil clause.)
   defp on_iteration_with_startup_signal(base, report_to) when is_function(base, 1) do
     fn
       %{iteration: 0} = payload ->

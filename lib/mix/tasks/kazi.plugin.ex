@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.Kazi.Plugin do
-  @shortdoc "Render the kazi Claude Code plugin bundle (manifest + skill + hooks + MCP)"
+  @shortdoc "Render the kazi Claude Code plugin bundle (manifest + skill + MCP)"
 
   @moduledoc """
   The CI entry point that renders the `kazi` Claude Code plugin bundle (T61.3,
@@ -9,14 +9,14 @@ defmodule Mix.Tasks.Kazi.Plugin do
 
   It writes a self-contained plugin directory under `<dir>`:
 
-      .claude-plugin/plugin.json   -- the manifest (metadata + inline MCP + hooks)
+      .claude-plugin/plugin.json   -- the manifest (metadata + inline MCP)
       skills/kazi/SKILL.md         -- the router
       skills/kazi/AUTHORING.md
       skills/kazi/RECIPES.md
 
   Every byte is rendered from the SAME single sources of truth the explicit
   installers use (`Kazi.Plugin.Manifest`, which reads `InstallSkill.docs/0`,
-  `ClientConfig.server_entry/0`, and `InstallHooks.hook_commands/0`) -- this
+  `ClientConfig.server_entry/0`) -- this
   task adds no teaching or config logic of its own.
 
   With no `--version`, the plugin version is the running kazi version (from the

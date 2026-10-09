@@ -45,13 +45,6 @@ config :kazi, KaziWeb.Endpoint,
   pubsub_server: Kazi.PubSub,
   live_view: [signing_salt: "kazi-live"]
 
-# T65.4 (#1430): the tombstone-alias grace window for a bus rename. When
-# `kazi bus name` renames an already-named session, the OLD name lingers as a
-# resolvable tombstone-alias for this many seconds so an in-flight
-# `bus tell <old-name>` still lands (with a renamed-notice on the sender's ack);
-# after the window it errors with the current name as a hint. Default 10 minutes.
-config :kazi, :bus_rename_grace_s, 600
-
 # T67.3 (ADR-0079 / ADR-0034): the opt-in session-stats velocity collector is
 # DISABLED by default. A machine reads NO local transcript until the operator
 # opts in here (`enabled: true`) or via the `KAZI_VELOCITY_COLLECTOR` env

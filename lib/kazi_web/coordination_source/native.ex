@@ -3,11 +3,8 @@ defmodule KaziWeb.CoordinationSource.Native do
   The **non-NATS** `KaziWeb.CoordinationSource`: the lease map for a single-node,
   NATS-free (native) parallel run (the dashboard-lease-map blocker fix).
 
-  `KaziWeb.CoordinationSource.Transport` reads the daemon's bus roster (or, when
-  `:coordination_opts` is configured, aggregates over the coordination
-  transport). The native scheduler announces neither: it coordinates partitions
-  on per-run in-memory leases, recorded into the globally-readable
-  `Kazi.Coordination.LeaseTable`.
+  `KaziWeb.CoordinationSource.Transport` reads explicitly configured coordination
+  presence and intents. Native reads local leases without a messaging service.
 
   This source reads that table directly. It is the dashboard's **no-daemon
   fallback** (`KaziWeb.CoordinationSource.select/0` defaults to it whenever no
@@ -38,8 +35,6 @@ defmodule KaziWeb.CoordinationSource.Native do
 
   @impl CoordinationSource
   def snapshot do
-    # Native runs announce no presence/intent over a bus; the lease map is the
-    # active native leases recorded in the readable LeaseTable. Absent table ⇒ [].
     CoordinationSource.build([], [], LeaseTable.list(table()))
   end
 

@@ -91,7 +91,7 @@ defmodule Kazi.CLIHelpSchemaTest do
       # aliases were removed in v0.6.0, so the table (and help --json) omits them.
       expected =
         MapSet.new(
-          ~w(apply status orphans portfolio init install-skill install-hooks mcp dashboard daemon bus economy plan list-proposed approve reject export lint spec context memory help schema version)
+          ~w(apply status orphans portfolio init install-skill mcp dashboard daemon economy plan list-proposed approve reject export lint spec context memory help schema version)
         )
 
       assert reported == expected,
@@ -225,16 +225,9 @@ defmodule Kazi.CLIHelpSchemaTest do
       assert MapSet.subset?(MapSet.new(~w(kind ref status predicates)), field_names)
     end
 
-    test "schema bus returns the digest envelope schema (T55.1, ADR-0072); parses" do
-      out = capture_io(fn -> assert Kazi.CLI.run(["schema", "bus"]) == 0 end)
-
-      assert {:ok, schema} = Jason.decode(String.trim(out))
-      assert schema["schema_version"] == 2
-      assert schema["command"] == "bus"
-      field_names = schema["fields"] |> Enum.map(& &1["name"]) |> MapSet.new()
-      assert MapSet.subset?(MapSet.new(~w(ok digest messages)), field_names)
-      # The digest is the introspectable default; the example carries the bound shape.
-      assert schema["example"]["digest"]["total"] == 202
+    test "removed bus schema returns an error" do
+      output = capture_io(fn -> assert Kazi.CLI.run(["schema", "bus"]) == 1 end)
+      assert Jason.decode!(output)["error"] =~ "no result schema"
     end
 
     test "schema (no command) returns all schemas keyed by the primary command" do
@@ -331,9 +324,6 @@ defmodule Kazi.CLIHelpSchemaTest do
 
         # `bus` requires a <subcommand> positional; probe with a real one
         # (`who`, which takes no further args, T51.2).
-        "bus" ->
-          ["bus", "who"]
-
         # `spec` requires an `import` subcommand + a <feature-file> and --into
         # <goal-file>; probe with a real shape so we observe dispatch, not the
         # missing-subcommand/missing-flag error (T40.2).

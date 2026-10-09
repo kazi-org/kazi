@@ -4,7 +4,7 @@ defmodule Kazi.Portfolio do
   complete -- composed ONLY from kazi's own objective surfaces (the
   read-only-projection line, ADR-0011): proposed goals (`list-proposed`), the
   run registry, the attention queue (`Kazi.Attention.Queue`, ADR-0057), and
-  the cross-machine bus facts T60.1's `Kazi.Runtime.BusMirror` posts. No
+  externally configured remote run facts. No
   manual curation, no new task-management data model -- every entry traces to
   an existing objective source.
 
@@ -19,8 +19,8 @@ defmodule Kazi.Portfolio do
       `:complete` via `bucket/2` -- the SAME classifier `:fleet_remote` uses
       below, so "what counts as stuck" has exactly one definition, not two.
     * `:fleet_remote` -- runs in flight on OTHER machines, read from the SAME
-      `run:<short-id>` bus facts T60.1's Mission Control remote cards use.
-      These carry no workspace (a text bus fact has no repo field), so they
+      configured remote run facts consumed by Mission Control.
+      These carry no workspace (a remote fact has no repo field), so they
       are reported fleet-wide only, not force-grouped into `:by_repo`.
 
   Best-effort throughout (ADR-0011 §2 / ADR-0067 point 1's mirror invariant):
@@ -471,10 +471,6 @@ defmodule Kazi.Portfolio do
     end
   end
 
-  # ===========================================================================
-  # :fleet_remote -- cross-machine runs, from T60.1's bus facts
-  # ===========================================================================
-
   defp remote_entries(local_runs) do
     local_refs = local_runs |> Enum.map(& &1.goal_ref) |> MapSet.new()
 
@@ -500,12 +496,7 @@ defmodule Kazi.Portfolio do
     end
   end
 
-  defp default_remote_run_facts do
-    case Kazi.Bus.board(claims: false) do
-      {:ok, %{"facts" => facts}} -> facts
-      _other -> []
-    end
-  end
+  defp default_remote_run_facts, do: []
 
   @remote_started_re ~r/^started (?<goal_ref>\S+)$/
   @remote_terminal_re ~r/^(?<verb>converged|over_budget|stuck|stopped|error) (?<goal_ref>\S+)(?: \(.*\))?$/
@@ -514,7 +505,7 @@ defmodule Kazi.Portfolio do
 
   defp parse_remote_fact(%{"topic" => "run:" <> _short, "machine" => machine, "text" => text})
        when is_binary(machine) and is_binary(text) do
-    if machine != Kazi.Bus.hostname() do
+    if machine != System.get_env("HOSTNAME", to_string(elem(:inet.gethostname(), 1))) do
       case remote_fact_bucket(text) do
         {goal_ref, bucket} -> %{goal_ref: goal_ref, bucket: bucket, machine: machine}
         nil -> nil

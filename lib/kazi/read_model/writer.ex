@@ -196,7 +196,7 @@ defmodule Kazi.ReadModel.Writer do
   # before. With a daemon, the plan crosses the control socket, the single writer
   # applies it, and the helper RECONSTRUCTS the caller-visible return so a call
   # site's `{:ok, struct}` / `{:error, changeset}` / count contract is preserved
-  # (see the "Return-value reconstruction" note in `docs/session-bus.md`).
+  # (see the "Return-value reconstruction" note in `docs/daemon.md`).
   # ===========================================================================
 
   @doc """

@@ -1,5 +1,7 @@
 # ADR-0084: The session-bus hooks require a separate opt-in gate -- installing the Claude Code plugin is no longer sufficient consent by itself
 
+> Superseded for the session bus on 2026-10-04: kazi messaging was removed in favour of [Ajent](../ajent.md). This document records the historical implementation.
+
 ## Status
 
 Accepted

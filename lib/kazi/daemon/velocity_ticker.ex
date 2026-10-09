@@ -75,13 +75,6 @@ defmodule Kazi.Daemon.VelocityTicker do
   to apply a client batch. The ticker's writes therefore never touch its own
   socket.
 
-  The collector's OTHER ship -- the bus `fact` (`Kazi.Bus.post/3`) -- does dial
-  the control socket to discover the NATS port, but is safe in-daemon: every
-  `Kazi.Bus` call runs under `Kazi.Bus.run/3`'s hard deadline (it degrades to
-  `{:error, :bus_unavailable}` rather than block past the bound), and the
-  collector additionally swallows any post error. It can never wedge the daemon
-  the way the unbounded `Writer` socket write did.
-
   ## Delivery projection (T67.6 finding 2)
 
   T67.2 shipped `Kazi.ReadModel.DeliveryProjection.project/2` but nothing invoked

@@ -48,21 +48,8 @@ stdio (`{"mcpServers": {"kazi": {"command": "kazi", "args": ["mcp"]}}}`)
 | `kazi_apply` | Converge a goal — drives the harness loop until true/stuck/over-budget |
 | `kazi_status` | Report on a run or proposal's lifecycle state |
 | `kazi_list_proposed` | List drafted proposals awaiting approval |
-| `kazi_bus_post` | Post a message to the session coordination bus |
-| `kazi_bus_read` | Read bus messages (idempotent, no cursor consumed) |
-| `kazi_bus_watch` | Watch the bus for new messages |
-| `kazi_bus_who` | List sessions on the bus |
-| `kazi_bus_board` | Read the current bus board/topic summary |
-| `kazi_bus_tell` | Send a message to a specific session |
-| `kazi_bus_status` | Check delivery status of a `kazi_bus_tell` message |
-| `kazi_bus_get` | Fetch a specific bus message by id |
-| `kazi_bus_name` | Get/set this session's bus display name |
 
-(`kazi_plan`/`kazi_approve`/`kazi_apply`/`kazi_status`/`kazi_list_proposed`
-are the primary goal-driving surface; the `kazi_bus_*` tools are the
-multi-session coordination layer. Verify this list against
-`lib/kazi/mcp/server.ex` before submitting — it grows as kazi ships more
-tools.)
+Agent communication uses the independent [Ajent client](https://github.com/ajent-social/ajent).
 
 ## Example config (for forms that want a config snippet)
 

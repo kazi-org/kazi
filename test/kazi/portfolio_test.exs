@@ -376,7 +376,7 @@ defmodule Kazi.PortfolioTest do
         [
           %{
             "topic" => "run:abcdef12",
-            "machine" => Kazi.Bus.hostname(),
+            "machine" => System.get_env("HOSTNAME", to_string(elem(:inet.gethostname(), 1))),
             "text" => "started local-goal"
           }
         ]

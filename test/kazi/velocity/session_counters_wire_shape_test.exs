@@ -1,8 +1,7 @@
 defmodule Kazi.Velocity.SessionCountersWireShapeTest do
   @moduledoc """
   T67.3 HEADLINE ACCEPTANCE (ADR-0079 R-E67-3): the collector NEVER emits
-  transcript content. The wire payload — both the bus `fact` text and the
-  read-model row attrs — contains ONLY the closed counter whitelist plus session
+  transcript content. The wire payload — the read-model row attrs — contains ONLY the closed counter whitelist plus session
   identity. No free-text/content field (prompt text, tool names, file paths) can
   cross the wire, pinned here so any future field that leaks content fails this
   test.
@@ -45,8 +44,8 @@ defmodule Kazi.Velocity.SessionCountersWireShapeTest do
     assert keys == Enum.sort(@allowed_keys)
   end
 
-  test "the shipped bus fact carries no transcript content" do
-    # Capture the exact text the collector would post on the bus.
+  test "the persisted counter row carries no transcript content" do
+    # Capture the exact counter row the collector writes.
     parent = self()
 
     state_dir =
@@ -58,26 +57,22 @@ defmodule Kazi.Velocity.SessionCountersWireShapeTest do
       dir: @fixtures,
       state_dir: state_dir,
       machine: "test-host",
-      poster: fn "fact", text, opts -> send(parent, {:fact, text, opts}) end,
       # Do not touch the read-model in this pure wire-shape assertion.
-      write: fn _wire -> :ok end
+      write: fn wire -> send(parent, {:fact, Jason.encode!(wire), []}) end
     )
 
     facts = collect_facts([])
     assert facts != []
 
-    for {text, opts} <- facts do
+    for {text, _opts} <- facts do
       # The fact is valid JSON whose keys are only the whitelist.
       assert {:ok, decoded} = Jason.decode(text)
       assert Enum.sort(Map.keys(decoded)) == Enum.sort(@allowed_keys)
 
-      # The topic is session-scoped, not content.
-      assert opts[:topic] =~ ~r/^session:/
-
       # No content marker appears anywhere in the encoded payload.
       for marker <- @content_markers do
         refute String.contains?(text, marker),
-               "content marker #{inspect(marker)} leaked into the bus fact: #{text}"
+               "content marker #{inspect(marker)} leaked into the counter row: #{text}"
       end
     end
   end

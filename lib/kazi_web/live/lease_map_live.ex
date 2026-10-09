@@ -14,19 +14,10 @@ defmodule KaziWeb.LeaseMapLive do
   `KaziWeb.CoordinationSource.select/0` (T55.3, ADR-0073 §4): an explicit
   `:lease_map_source` config override always wins (a LiveView/Playwright test
   points it at a fixture source with no NATS); otherwise the view defaults to
-  `KaziWeb.CoordinationSource.Transport` when a kazi daemon is reachable — so
-  the presence rail renders the LIVE bus roster (session, machine, last-seen) —
-  and falls back to `KaziWeb.CoordinationSource.Native` (the NATS-free source
-  that reads the live per-run leases from `Kazi.Coordination.LeaseTable`) when
-  no daemon runs, rendering exactly as a single-node native run always has.
-  The selected source is observable in the markup (`data-source` on the main
-  element). A fresh snapshot pushed on the source topic — e.g. one with a
-  released lease dropped — re-renders the map live, and a connected view also
-  re-reads its source on a slow poll so roster churn (a session appearing on or
-  aging off the bus) shows up without a manual reload.
-
-  When nothing is present and no leases are held the view renders a clear empty
-  state.
+  `KaziWeb.CoordinationSource.Native`, or Transport with `:coordination_opts`;
+  the presence rail renders configured coordination presence. Without a configured
+  source it remains empty while native leases stay visible. A slow refresh also
+  observes external providers without requiring a push channel.
   """
   use KaziWeb, :live_view
 
@@ -37,10 +28,6 @@ defmodule KaziWeb.LeaseMapLive do
   def mount(_params, _session, socket) do
     source = CoordinationSource.select()
 
-    # Live updates: subscribe to the source's topic on the connected mount only
-    # (the static render has no socket to push to). A broadcast carries the fresh
-    # snapshot, which we render directly. The refresh tick re-reads the source on
-    # a slow poll — the bus roster has no push channel into this node.
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Kazi.PubSub, source.topic())
       Process.send_after(self(), :refresh, refresh_ms())

@@ -1,16 +1,4 @@
 defmodule KaziWeb.CoordinationSourceSelectTest do
-  @moduledoc """
-  T55.3 (ADR-0073 §4): the dashboard's source choice is decided, not hardcoded.
-
-  `KaziWeb.CoordinationSource.select/0` must pick the transport-backed source
-  when a daemon control socket probes `:alive` (via the same `Kazi.Daemon.Probe`
-  seam the CLI's daemon verbs use), fall back to the native source when no
-  daemon is reachable, and always yield to an explicit `:lease_map_source`
-  override (the pre-existing ADR-0011 §3 injection seam).
-
-  Hermetic: the "daemon" is `Kazi.TestSupport.FakeDaemonSocket`, a bare Unix
-  socket listener — no real daemon, no NATS.
-  """
   use ExUnit.Case, async: false
 
   alias Kazi.TestSupport.FakeDaemonSocket
@@ -18,10 +6,13 @@ defmodule KaziWeb.CoordinationSourceSelectTest do
 
   setup do
     prev_source = Application.get_env(:kazi, :lease_map_source)
+    prev_opts = Application.get_env(:kazi, :coordination_opts)
+    Application.delete_env(:kazi, :coordination_opts)
     prev_sock = Application.get_env(:kazi, :lease_map_daemon_sock)
     Application.delete_env(:kazi, :lease_map_source)
 
     on_exit(fn ->
+      restore(:coordination_opts, prev_opts)
       restore(:lease_map_source, prev_source)
       restore(:lease_map_daemon_sock, prev_sock)
     end)
@@ -32,10 +23,15 @@ defmodule KaziWeb.CoordinationSourceSelectTest do
   defp restore(key, nil), do: Application.delete_env(:kazi, key)
   defp restore(key, value), do: Application.put_env(:kazi, key, value)
 
-  test "defaults to the transport-backed source when a daemon socket is alive" do
+  test "daemon availability does not select a messaging roster" do
     sock = FakeDaemonSocket.start!()
     Application.put_env(:kazi, :lease_map_daemon_sock, sock)
 
+    assert CoordinationSource.select() == KaziWeb.CoordinationSource.Native
+  end
+
+  test "configured coordination selects transport" do
+    Application.put_env(:kazi, :coordination_opts, [])
     assert CoordinationSource.select() == KaziWeb.CoordinationSource.Transport
   end
 

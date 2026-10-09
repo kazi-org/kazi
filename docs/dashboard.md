@@ -369,17 +369,11 @@ active run registered in this node) render their honest empty state, never a
 
 The presence + lease map is a read-only projection of the coordination
 substrate (ADR-0011: it observes, never writes). Its source is chosen at
-render time (T55.3, [ADR-0073](adr/0073-the-board-current-state-claims-identity.md)
-§4): **when a `kazi daemon` is running** on the machine (detected by probing
-the daemon's control socket, the same check `kazi daemon status` makes), the
-view defaults to the transport-backed source and the presence rail renders the
-**live bus roster** — each session with its machine and last-seen freshness,
-the same rows `kazi bus who` lists. **Without a daemon** it falls back to the
-native source and renders exactly as a single-node run always has: the live
-native lease table, an honest empty presence rail, never a 500. An explicit
-`:lease_map_source` config override wins over both. The selected source is
-stamped on the page (`data-source`), the roster re-reads on a slow poll, and
-rows past the session TTL are hidden.
+render time: the native lease table is the default. Configured
+`:coordination_opts` selects the coordination transport's presence and intents;
+an explicit `:lease_map_source` override takes precedence. Daemon availability
+no longer selects a messaging roster. The removed bus no longer supplies remote
+run cards or waiting-on-operator notifications; local run evidence remains visible.
 
 ## Velocity surface (E67, ADR-0079)
 

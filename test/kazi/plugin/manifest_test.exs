@@ -3,7 +3,6 @@ defmodule Kazi.Plugin.ManifestTest do
 
   alias Kazi.MCP.ClientConfig
   alias Kazi.Plugin.Manifest
-  alias Kazi.Teach.InstallHooks
   alias Kazi.Teach.InstallSkill
 
   @fixed_version "1.246.0"
@@ -56,21 +55,8 @@ defmodule Kazi.Plugin.ManifestTest do
     end
   end
 
-  describe "hooks -- matches T55.9's implemented events" do
-    test "every InstallHooks registration appears with the same command" do
-      hooks = Manifest.manifest(version: @fixed_version)["hooks"]
-
-      for {event, command} <- InstallHooks.hook_commands() do
-        assert [%{"hooks" => [entry]}] = hooks[event]
-        assert entry == %{"type" => "command", "command" => command}
-      end
-    end
-
-    test "no extra events beyond what install-hooks registers" do
-      declared = Manifest.manifest()["hooks"] |> Map.keys() |> Enum.sort()
-      implemented = InstallHooks.hook_commands() |> Enum.map(&elem(&1, 0)) |> Enum.sort()
-      assert declared == implemented
-    end
+  test "plugin has no messaging hooks" do
+    refute Map.has_key?(Manifest.manifest(), "hooks")
   end
 
   describe "bundle/1 -- rendered skill content" do
