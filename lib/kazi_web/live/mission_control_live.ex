@@ -8,8 +8,7 @@ defmodule KaziWeb.MissionControlLive do
   fleet-count strip, a **NEEDS ATTENTION** row (the ranked attention queue,
   `Kazi.Attention.Queue`), a **FLEET** grid of one card per goal, a **PLANNED**
   section of approved-but-undispatched proposals (T60.4, #1160 — the queue's
-  unstarted/todo goals, per-machine by construction since proposals are not
-  bus-synced), and a bottom
+  unstarted/todo goals, stored locally), and a bottom
   **EVENT RIVER** ticker. It renders state; it never mutates a run, a goal, or a
   lease (ADR-0011 §2 reaffirmed at fleet scope) — the only interactions are the
   navigation deep-links into the full drill-in / board / lease / event pages.
@@ -117,10 +116,6 @@ defmodule KaziWeb.MissionControlLive do
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Process.send_after(self(), :tick, @poll_ms)
-      # T51.5 (ADR-0073 §4): subscribe to the coordination source's topic so a
-      # fresh bus roster pushes into the SESSIONS rail live. Both production
-      # sources share one topic and an explicit override never changes, so the
-      # mount-time subscription stays valid across a daemon starting/stopping.
       Phoenix.PubSub.subscribe(Kazi.PubSub, CoordinationSource.select().topic())
     end
 
@@ -161,8 +156,6 @@ defmodule KaziWeb.MissionControlLive do
     {:noreply, socket |> assign_fleet() |> assign_presence()}
   end
 
-  # T51.5: a fresh coordination snapshot pushed on the source topic (e.g. a
-  # session appearing on or aging off the bus) re-renders the SESSIONS rail live.
   @impl true
   def handle_info({:coordination_updated, %Snapshot{} = snapshot}, socket) do
     {:noreply, assign(socket, :presence, snapshot.present)}
@@ -409,14 +402,6 @@ defmodule KaziWeb.MissionControlLive do
     end
   end
 
-  # T60.4 (#1160): the PLANNED bucket — approved proposals no run has picked up
-  # yet, i.e. the queue's unstarted/todo goals. A read-only projection over the
-  # proposed-goals store (ADR-0011); a proposal leaves PLANNED the moment ANY
-  # run registers its goal_id (dispatched work is the fleet grid's job,
-  # whatever its state). Proposals are machine-local (not bus-synced), so this
-  # bucket is per-machine by construction. Best-effort like every other
-  # read-model touch here: an unavailable store renders an empty section,
-  # never a 500.
   defp assign_planned(socket, all_runs) do
     planned = planned_proposals(all_runs)
     {shown, more} = Enum.split(planned, @planned_cap)
@@ -437,12 +422,6 @@ defmodule KaziWeb.MissionControlLive do
     _, _ -> []
   end
 
-  # T51.5 (ADR-0073 §4): the SESSIONS rail's live bus presence, read from the
-  # SAME injectable `KaziWeb.CoordinationSource` the `/leases` map uses --
-  # Transport when a daemon is reachable (the live bus roster: session, machine,
-  # last-seen), Native otherwise (empty, never a crash -- L-0021). Re-selected
-  # each tick so a daemon starting or stopping flips the rail live. A source that
-  # cannot answer degrades to an empty rail, never a 500.
   defp assign_presence(socket) do
     source = CoordinationSource.select()
 
@@ -513,16 +492,6 @@ defmodule KaziWeb.MissionControlLive do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Cross-machine fleet visibility (T60.1, #1154 clause 3): a run in flight on
-  # ANOTHER machine is invisible to `RunRegistry.list/0` (per-machine SQLite,
-  # ADR-0057) -- render it as a distinct card sourced from the bus board's
-  # last-value-per-topic `run:<short-id>` facts (T51.5's `Kazi.Runtime.BusMirror`)
-  # instead. Read-only, best-effort (ADR-0011 §2 / ADR-0067 point 1's mirror
-  # invariant mirrored here): an unreachable daemon degrades to zero remote
-  # cards, never an error -- the local fleet grid renders exactly as before.
-  # ---------------------------------------------------------------------------
-
   defp remote_cards(all_runs) do
     local_refs = all_runs |> Enum.map(& &1.goal_ref) |> MapSet.new()
 
@@ -534,12 +503,6 @@ defmodule KaziWeb.MissionControlLive do
     |> Enum.map(&remote_card/1)
   end
 
-  # Injectable (ADR-0011 §3, mirroring `liveness_source/0`/`CoordinationSource`):
-  # defaults to the real bus board, overridable in test config so a LiveView
-  # test can seed a fixture fact list with no daemon. The fetcher call itself
-  # (default OR injected) is wrapped in try/rescue/catch -- an unreachable
-  # daemon or a raising fixture degrades to zero remote cards, never a crashed
-  # render (same contract `assign_presence/1` already gives the SESSIONS rail).
   defp remote_run_facts do
     fetch = Application.get_env(:kazi, :remote_run_facts_fetcher, &default_remote_run_facts/0)
 
@@ -552,24 +515,16 @@ defmodule KaziWeb.MissionControlLive do
     end
   end
 
-  defp default_remote_run_facts do
-    case Kazi.Bus.board(claims: false) do
-      {:ok, %{"facts" => facts}} -> facts
-      _other -> []
-    end
-  end
+  defp default_remote_run_facts, do: []
 
   @remote_started_re ~r/^started (?<goal_ref>\S+)$/
   @remote_terminal_re ~r/^(?<verb>converged|over_budget|stuck|stopped|error) (?<goal_ref>\S+)(?: \(.*\))?$/
   @remote_terminated_re ~r/^terminated (?<goal_ref>\S+) \(.*\)$/
   @remote_iter_re ~r/^iter \d+: .+ (?<goal_ref>\S+)$/
 
-  # A fact from OUR OWN machine is not "remote" -- `Kazi.Bus.hostname/0` is the
-  # SAME value every posted fact's `machine` header carries, reused rather than
-  # a second hostname check.
   defp parse_remote_fact(%{"topic" => "run:" <> _short, "machine" => machine, "text" => text})
        when is_binary(machine) and is_binary(text) do
-    if machine != Kazi.Bus.hostname() do
+    if machine != System.get_env("HOSTNAME", to_string(elem(:inet.gethostname(), 1))) do
       case remote_fact_state(text) do
         {goal_ref, state} -> %{goal_ref: goal_ref, state: state, machine: machine}
         nil -> nil
@@ -1108,18 +1063,6 @@ defmodule KaziWeb.MissionControlLive do
     }
   end
 
-  # ---------------------------------------------------------------------------
-  # WAITING ON YOU — the SESSION-level fan-in half of the attention panel
-  # (T63.8, IA Q2/Q3, #1386 reconciliation): sessions blocked on a human are a
-  # different identity from run-level attention (a session vs a run, cleared by
-  # a human reply vs a state change), so they compose as their OWN labeled
-  # sub-section, not interleaved. E60/T60.3 ships the plumbing — a session posts
-  # a `waiting-on-operator` fact the bus board already fans in fleet-wide
-  # (`Kazi.Bus.board`'s `"attention"` list); this only READS and renders it,
-  # NAMING the awaited action. Best-effort/injectable (ADR-0011 §2), mirroring
-  # `remote_run_facts/0`: an unreachable daemon degrades to an empty sub-section.
-  # ---------------------------------------------------------------------------
-
   defp waiting_alerts do
     waiting_sessions()
     |> Enum.map(&waiting_alert/1)
@@ -1157,12 +1100,7 @@ defmodule KaziWeb.MissionControlLive do
     end
   end
 
-  defp default_waiting_sessions do
-    case Kazi.Bus.board(claims: false) do
-      {:ok, %{"attention" => entries}} when is_list(entries) -> entries
-      _other -> []
-    end
-  end
+  defp default_waiting_sessions, do: []
 
   defp alert_severity(:cause), do: "NEEDS YOU"
   defp alert_severity(:stuck), do: "STUCK"

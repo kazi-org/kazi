@@ -19,17 +19,13 @@ defmodule Kazi.Velocity.SessionCollector do
   the work regardless of the gate (it is what `run/1` calls once the gate passes,
   and what tests drive directly).
 
-  ## Two ships, one whitelist (ADR-0079 decision 2 + 3)
+  ## Local counter projection
 
-    * a bus `fact` on topic `session:<short-uuid>` (the T60.1 `BusMirror`
-      last-value-per-subject pattern) carries the counters cross-machine; because
-      the counters are cumulative and a `fact` keeps only the last value per
-      subject, a re-post idempotently overwrites the session's current totals;
     * the read-model row is written through `Kazi.ReadModel.Writer` (the ADR-0068
       daemon single-writer seam) as an upsert on `(session_uuid, machine)`.
 
-  BOTH payloads are built from `Kazi.Velocity.Counters.to_wire/2`, the one closed
-  whitelist, so nothing outside the schema can cross either path — the property
+  Row attributes are built from `Kazi.Velocity.Counters.to_wire/2`, the one closed
+  whitelist, so nothing outside the schema can enter the read-model — the property
   `session_counters_wire_shape_test.exs` pins.
   """
 
@@ -97,8 +93,6 @@ defmodule Kazi.Velocity.SessionCollector do
       Defaults to a tmp-scoped kazi dir; pass a stable dir in production.
     * `:machine` — the host label recorded on the counters. Defaults to the
       `KAZI_VELOCITY_MACHINE` env var or the system hostname.
-    * `:poster` — `(kind, text, opts -> any)` bus poster for the counter fact.
-      Defaults to `&Kazi.Bus.post/3`; best-effort (errors are swallowed).
     * `:write` — `(map -> any)` sink for the read-model row attrs. Defaults to the
       `Kazi.ReadModel.Writer` upsert. Injectable so a test asserts row shape.
     * `:bucket_cap_s` — active-time gap cap, passed to the parser.
@@ -112,14 +106,12 @@ defmodule Kazi.Velocity.SessionCollector do
     state_dir = Keyword.get(opts, :state_dir, default_state_dir())
     machine = Keyword.get(opts, :machine) || default_machine()
 
-    # #1606: `bus_ok?` circuit-breaks the best-effort fact post for the REST of
-    # this pass once the bus has failed once — see `post_fact/5`.
-    {collected, _bus_ok?} =
+    collected =
       dir
       |> transcripts()
-      |> Enum.reduce({[], true}, fn path, {acc, bus_ok?} ->
-        {results, bus_ok?} = collect_transcript(path, state_dir, machine, opts, bus_ok?)
-        {acc ++ results, bus_ok?}
+      |> Enum.reduce([], fn path, acc ->
+        results = collect_transcript(path, state_dir, machine, opts)
+        acc ++ results
       end)
 
     collected
@@ -129,7 +121,7 @@ defmodule Kazi.Velocity.SessionCollector do
     Path.wildcard(Path.join(dir, "**/*.jsonl")) |> Enum.sort()
   end
 
-  defp collect_transcript(path, state_dir, machine, opts, bus_ok?) do
+  defp collect_transcript(path, state_dir, machine, opts) do
     cursor = Cursor.load(state_dir, path)
     max_bytes = Keyword.get(opts, :max_bytes, @default_max_bytes_per_pass)
 
@@ -139,7 +131,7 @@ defmodule Kazi.Velocity.SessionCollector do
       # current from the pass that first read it. This is what makes a steady-state
       # pass over a large tree cost only a stat per file (#1606).
       :skip ->
-        {[], bus_ok?}
+        []
 
       {:ok, chunk, next_offset} ->
         result =
@@ -160,7 +152,7 @@ defmodule Kazi.Velocity.SessionCollector do
           session_name: session_name
         })
 
-        ship(session_uuid, session_name, machine, cumulative, opts, bus_ok?)
+        ship(session_uuid, session_name, machine, cumulative, opts)
     end
   end
 
@@ -211,54 +203,15 @@ defmodule Kazi.Velocity.SessionCollector do
   # A chunk with no resolvable session UUID yields nothing (nothing to key on);
   # otherwise ship the fact and write the row from the ONE whitelist, then return
   # the collected result.
-  defp ship(nil, _name, _machine, _counters, _opts, bus_ok?), do: {[], bus_ok?}
+  defp ship(nil, _name, _machine, _counters, _opts), do: []
 
-  defp ship(session_uuid, session_name, machine, counters, opts, bus_ok?) do
+  defp ship(session_uuid, session_name, machine, counters, opts) do
     identity = %{session_uuid: session_uuid, session_name: session_name, machine: machine}
     wire = Counters.to_wire(counters, identity)
 
-    bus_ok? = post_fact(session_uuid, session_name, wire, opts, bus_ok?)
     write_row(wire, opts)
 
-    {[%{session_uuid: session_uuid, session_name: session_name, counters: counters}], bus_ok?}
-  end
-
-  # Best-effort bus fact (the T60.1 mirror contract): a daemon-down / error /
-  # timeout degrades, never a collector crash.
-  #
-  # #1606 CIRCUIT-BREAK: once the bus has failed ONCE in this pass, skip it for
-  # every remaining session. `Kazi.Bus.run/3` bounds a single call at 15s, but the
-  # collector posts once PER SESSION — so against an unreachable-but-blackholing
-  # host a pass paid that deadline N times (N x 15s) and overran its tick
-  # interval, which is the SECOND live #1606 failure mode: the ticker logged
-  # "velocity pass still running after 10000ms; skipping this tick" forever while
-  # `passes_killed` stayed 0 (the pass never reached the 120s kill deadline).
-  # Same unreachable host as the `:ehostunreach` crash mode — only the network's
-  # behaviour differs (fail-fast vs blackhole) — so both are fixed together: the
-  # unlinked `Bus.run/3` stops the crash, this stops the stall. The read-model
-  # write is the essential ship; the fact is telemetry, so dropping it for the
-  # rest of a pass costs nothing (counters are cumulative — the next pass reposts
-  # the current totals).
-  @spec post_fact(String.t(), String.t() | nil, map(), keyword(), boolean()) :: boolean()
-  defp post_fact(_session_uuid, _session_name, _wire, _opts, false), do: false
-
-  defp post_fact(session_uuid, session_name, wire, opts, true) do
-    poster = Keyword.get(opts, :poster, &Kazi.Bus.post/3)
-    topic = "session:" <> short(session_uuid)
-    text = Jason.encode!(wire)
-
-    try do
-      case poster.("fact", text, topic: topic, session_name: session_name) do
-        # `Kazi.Bus` degrades to this rather than raising; treat it as "the bus is
-        # down for this pass" and stop paying its deadline per session.
-        {:error, _reason} -> false
-        _posted -> true
-      end
-    rescue
-      _ -> false
-    catch
-      _, _ -> false
-    end
+    [%{session_uuid: session_uuid, session_name: session_name, counters: counters}]
   end
 
   defp write_row(wire, opts) do
@@ -310,8 +263,6 @@ defmodule Kazi.Velocity.SessionCollector do
   defp replaceable_fields do
     Counters.wire_fields() ++ [:session_name, :updated_at]
   end
-
-  defp short(uuid) when is_binary(uuid), do: String.slice(uuid, 0, 8)
 
   defp default_machine do
     case System.get_env("KAZI_VELOCITY_MACHINE") do

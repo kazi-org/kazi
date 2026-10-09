@@ -9,7 +9,7 @@ defmodule Kazi.Daemon.Write do
   `update_all`/`delete_all`, `null` for `insert`/`sql`) so a count-returning
   client call reconstructs its return faithfully; `applied` (the entry count) is
   unchanged.
-  It is the sibling of `Kazi.Daemon.BusRead`: `Kazi.Daemon.Control` routes the
+  `Kazi.Daemon.Control` routes the
   `write` op here exactly as it routes `read` there.
 
   With the E51 daemon running it is the ONE process that opens the read-model
@@ -50,7 +50,6 @@ defmodule Kazi.Daemon.Write do
   atoms already exist once the module is loaded), so a bad `schema`/field is a
   clean `{"ok":false,"error":...}`, never an arbitrary-atom leak.
 
-  ## L-0052 bound (mirror of `BusRead.refuse_full/1`)
 
   `packet: :line` truncates an over-long line SILENTLY on the receiving end
   (`Kazi.Daemon.Probe.socket_buffer/0`, = 1 MiB). A write request at or over

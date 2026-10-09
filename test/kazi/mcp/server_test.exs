@@ -72,24 +72,9 @@ defmodule Kazi.MCP.ServerTest do
       # T27.5/T27.9 (ADR-0032): the tool names match the CLI verbs —
       # `kazi_plan`/`kazi_apply` (was `kazi_propose`/`kazi_run`). The deprecated
       # `kazi_propose`/`kazi_run` tool aliases were REMOVED in v0.6.0 (T27.9).
-      # T51.3 (ADR-0067) added the session-bus tools alongside these five;
-      # kazi_bus_watch (the no-poll wait, issue #1091) joined them later,
-      # kazi_bus_status (delivery visibility, T55.12) after that,
-      # kazi_bus_board (the current-state projection, T55.4/ADR-0073) after that,
-      # and kazi_bus_get (the deliberate pull for a stubbed body, T55.6/ADR-0072
-      # d3) after that.
       assert names == [
                "kazi_apply",
                "kazi_approve",
-               "kazi_bus_board",
-               "kazi_bus_get",
-               "kazi_bus_name",
-               "kazi_bus_post",
-               "kazi_bus_read",
-               "kazi_bus_status",
-               "kazi_bus_tell",
-               "kazi_bus_watch",
-               "kazi_bus_who",
                "kazi_list_proposed",
                "kazi_plan",
                "kazi_status"

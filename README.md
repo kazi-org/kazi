@@ -40,7 +40,7 @@ kazi install-skill        # teaches Claude Code the kazi skill (writes ~/.claude
 ```
 
 **Or install the Claude Code plugin** — one marketplace install bundles the skill, the
-kazi MCP server, and the session-bus hooks together, and refreshes them on the release
+kazi MCP server together, and refreshes them on the release
 cadence instead of on-demand re-runs of the explicit commands
 ([ADR-0077](docs/adr/0077-claude-code-plugin-distribution.md)):
 
@@ -197,7 +197,7 @@ The skill ships as three files (ADR-0074): `SKILL.md` (the router), `AUTHORING.m
 (predicate authoring quality — dense briefs, capability-vs-guard, the red-at-t0 rule, and a
 "shared_paths and contract" section, ADR-0087, on declaring fleet hotspots and the two lease
 scopes — interactive/integration-scoped vs. cross-container/Attempt-scoped), and
-`RECIPES.md` (escalation ladder, streaming, the check-only gate variant, the session bus).
+`RECIPES.md` (escalation ladder, streaming, the check-only gate variant, Ajent).
 It is fully self-contained — it never assumes any other skill exists. To wire kazi into
 your own local workflow (routing conventions, model policy), put them in
 `~/.claude/skills/kazi/LOCAL.md`: the skill reads it first when present, and
@@ -557,22 +557,9 @@ host, for example) needs the deadline raised.
 ### Install via the Claude Code plugin
 
 kazi also ships as a [Claude Code plugin](https://code.claude.com/docs/en/plugins-reference):
-one install bundles the kazi skill, the kazi MCP server registration, and the
-session-bus hook *declarations* together, and marketplace updates refresh them
-with the binary release cadence instead of on-demand re-runs of the explicit
-installers ([ADR-0077](docs/adr/0077-claude-code-plugin-distribution.md)). The
-explicit `install-skill` / `init --with-mcp` / `install-hooks` commands are
-unchanged — the plugin is an *additional* channel rendered from the SAME
-sources, never a fork.
-
-**The bus hooks need one more opt-in after installing the plugin**
-([ADR-0084](docs/adr/0084-bus-hooks-require-an-opt-in-gate-independent-of-plugin-install.md)):
-installing the plugin no longer by itself arms them, so a session on a
-machine that installed the plugin for the skill/MCP alone pays nothing for
-the bus. Set `KAZI_BUS_HOOKS=1` in your environment, or run
-`kazi install-hooks` (which arms it automatically, with no other change to
-this section's flow) — see [`docs/session-bus.md`](docs/session-bus.md#the-opt-in-gate-adr-0084)
-for the full mechanism.
+one install bundles the kazi skill and MCP server registration. Marketplace
+updates refresh them with the binary release cadence. The explicit
+`install-skill` and `init --with-mcp` commands remain available.
 
 **Install from the marketplace.** The release pipeline publishes the bundle to the
 [kazi-org/claude-plugins](https://github.com/kazi-org/claude-plugins) marketplace on
@@ -583,14 +570,6 @@ the binary release it was cut from, so marketplace content can never lag the bin
 /plugin marketplace add kazi-org/claude-plugins
 /plugin install kazi@kazi
 ```
-
-Because the binary (brew/direct install) and the plugin (marketplace) can be
-upgraded independently, kazi warns you if they drift out of lockstep: on
-`SessionStart` the session-bus hook (T61.5, ADR-0077) compares the local `kazi
-version` against the installed plugin's declared version and, on a mismatch,
-emits a single line naming both versions and which channel to update. It is
-silent when the versions match or when no plugin is installed, and never blocks
-the session.
 
 `mix kazi.plugin` renders that bundle from those single sources of truth (the
 generator adds no new teaching content — it only re-renders what the installers
@@ -605,7 +584,7 @@ It writes a self-contained plugin directory:
 
 ```
 dist/plugin/
-├── .claude-plugin/plugin.json   # metadata + inline MCP server + hook declarations
+├── .claude-plugin/plugin.json   # metadata + inline MCP server
 └── skills/kazi/
     ├── SKILL.md                 # the router (same content install-skill writes)
     ├── AUTHORING.md
@@ -978,17 +957,7 @@ kazi status <ref>                            # report a run's (or proposal's) cu
 kazi status                                  # list every currently LIVE run (pre-upgrade check, issue #971)
 kazi portfolio [--full]                      # sitrep "where are we / how is it going?": headline % across done/in-progress/blocked/todo/planned, bounded per-bucket summaries (blocked entries name their blocker), honest predicates-green rate — never a projected date (ADR-0046); --full restores the complete ledger (E64, #1427)
 kazi orphans [--reap]                         # list runs whose harness child process is still alive (#1073/#857); --reap sends TERM then KILL to each
-kazi install-hooks [--local] [--uninstall] # opt-in: register session-bus delivery hooks (SessionStart + UserPromptSubmit -> `kazi bus hook <event>`, ADR-0076); --uninstall reverts exactly
-kazi daemon start|status|stop                # the per-machine session-bus daemon (ADR-0067); `start` also supervises nats-server
-kazi bus post [<kind>] <text>                # broadcast to the local/team bus; <kind> defaults to `fact` (ADR-0067)
-kazi bus tell <session>|<nickname>|@<team> <text>  # direct message; prints a message id (T55.12)
-kazi bus status <id>                         #   pending|consumed delivery state for a `bus tell` (T55.12)
-kazi bus watch [--timeout <n>] [--since <seq|now|all>] [--directed]  # block until a NEW message arrives (#1091/#1097); --directed: only messages addressed to you (#1720)
-kazi bus who [--all] [--team <t>] [--project <dir>] [--machine <host>]  # roster with liveness + inbox depth
-kazi bus read [--peek] | kazi bus peek       #   consume / non-destructively view your inbox (digest by default, ADR-0072)
-kazi bus join <team> | kazi bus leave        #   named-team membership (issue #1069)
-kazi bus name <nickname>                     #   durable, addressable session name (T55.5)
-kazi bus <verb> --help                       #   full per-verb reference; see also docs/session-bus.md
+kazi daemon start|status|stop                # the per-machine read-model daemon
 kazi economy [--goal <ref>]                  # run-economics history: p50/p95 by goal-shape/model/harness (ADR-0058)
 kazi context index <label> <file>            # context store: index a heavy artifact
 kazi context search "<query>" [--budget N]   #   budget-fitted recall (--provider gist)
@@ -1010,20 +979,10 @@ kazi version                                 # print the kazi version and exit
 
 > **Drive kazi over MCP (preferred).** An MCP-speaking harness wires kazi as an MCP
 > server and drives its self-describing `kazi_plan` / `kazi_approve` / `kazi_apply` /
-> `kazi_status` / `kazi_list_proposed` tools — no JSON-CLI shell-out. The same server
-> also exposes the session-bus verbs (ADR-0067) as `kazi_bus_post` / `kazi_bus_read` /
-> `kazi_bus_watch` / `kazi_bus_who` / `kazi_bus_tell` / `kazi_bus_status` /
-> `kazi_bus_name`, mirroring `kazi bus post|read|watch|who|tell|status|name` — each
-> requires a running `kazi daemon` and reports a structured `no_daemon` tool error
-> otherwise. `kazi_bus_tell` returns the T55.12 delivery receipt (`id`, `liveness`)
-> that `kazi_bus_status` dereferences to `pending`/`consumed`; see docs/session-bus.md
-> ("MCP tools") for the full arg/response shape of each. The canonical client config
-> references the installed binary verb
-> (`kazi init --with-mcp` writes exactly this `.mcp.json`):
->
-> ```json
-> { "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }
-> ```
+> `kazi_status` / `kazi_list_proposed` tools — no JSON-CLI shell-out.
+> Canonical config: `{ "mcpServers": { "kazi": { "command": "kazi", "args": ["mcp"] } } }`.
+> Agent communication and shared findings use [Ajent](docs/ajent.md).
+
 
 > **Read-model note.** The Mix task (`mix kazi.apply`) creates and migrates the SQLite
 > read-model on startup, so every iteration is persisted. The standalone escript
@@ -1116,3 +1075,11 @@ file for attribution. Copyright 2026 Sire Run, Inc.
 <p align="center">
   Built by the team behind <a href="https://sire.run"><b>Sire</b></a>.
 </p>
+
+### Agent communication with Ajent
+
+The kazi session bus has been removed. Use the independent
+[Ajent client](https://github.com/ajent-social/ajent) for shared findings and agent
+communication. Run `ajent setup` to connect your harness. Kazi does not require
+Ajent to reconcile a goal or send run data to it automatically. See the
+[migration guide](docs/ajent.md) and [read-model daemon guide](docs/daemon.md).

@@ -13,7 +13,6 @@ defmodule Kazi.CLI.DaemonTest do
   import ExUnit.CaptureIO
 
   alias Kazi.Daemon
-  alias Kazi.TestSupport.NatsPrereq
 
   # ===========================================================================
   # Tier 1 -- the argv boundary
@@ -150,7 +149,7 @@ defmodule Kazi.CLI.DaemonTest do
       # listener's own bind is what decides the outcome (hermetic).
       output =
         capture_io(:stderr, fn ->
-          assert Kazi.CLI.run(["daemon", "start", "--nats-host", "127.0.0.1"], []) == 1
+          assert Kazi.CLI.run(["daemon", "start"], []) == 1
         end)
 
       assert output =~ "socket path too long (#{byte_size(sock_path)} bytes, limit #{limit})"
@@ -162,8 +161,6 @@ defmodule Kazi.CLI.DaemonTest do
 
   describe "kazi daemon status -- a live daemon" do
     setup do
-      NatsPrereq.ensure!()
-
       state_dir =
         Path.join(
           System.tmp_dir!(),
@@ -222,27 +219,6 @@ defmodule Kazi.CLI.DaemonTest do
     # T69.5 (#1684): the nats-server restart-loop / bind-conflict watchdog.
     # A freshly-started daemon with no exits yet reports the all-clear shape,
     # additively, alongside every pre-existing field.
-    test "reports nats_health additively under --json" do
-      output = capture_io(fn -> assert Kazi.CLI.run(["daemon", "status", "--json"], []) == 0 end)
-
-      decoded = Jason.decode!(output)
-      # Pre-existing fields untouched.
-      assert decoded["ok"] == true
-      assert decoded["vsn"] == expected_vsn()
-      assert is_integer(decoded["pid"])
-      assert is_integer(decoded["uptime_s"])
-
-      assert %{
-               "restart_loop" => false,
-               "exits_in_window" => 0,
-               "bind_conflict" => nil
-             } = decoded["nats_health"]
-    end
-
-    test "reports nats_health human-readably" do
-      output = capture_io(fn -> assert Kazi.CLI.run(["daemon", "status"], []) == 0 end)
-      assert output =~ "nats: ok"
-    end
 
     test "stop shuts the daemon down cleanly" do
       output = capture_io(fn -> assert Kazi.CLI.run(["daemon", "stop"], []) == 0 end)
@@ -260,8 +236,6 @@ defmodule Kazi.CLI.DaemonTest do
 
   describe "kazi daemon restart -- a live daemon (T52.4)" do
     setup do
-      NatsPrereq.ensure!()
-
       state_dir =
         Path.join(
           System.tmp_dir!(),
@@ -311,18 +285,15 @@ defmodule Kazi.CLI.DaemonTest do
           sock_path: sock_path,
           pid_path: pid_path,
           name: :"restart_old_sup_#{id}",
-          listener_name: :"restart_old_listener_#{id}",
-          store_dir: Path.join(state_dir, "js_old"),
-          port: 30_000 + rem(id, 20_000)
+          listener_name: :"restart_old_listener_#{id}"
         )
 
-      %{sock_path: sock_path, old_sup: old_sup, port2: 30_000 + rem(id + 1, 20_000)}
+      %{sock_path: sock_path, old_sup: old_sup}
     end
 
     test "restart stops the running daemon and stands up a fresh one on the same socket", %{
       sock_path: sock_path,
-      old_sup: old_sup,
-      port2: port2
+      old_sup: old_sup
     } do
       assert Process.alive?(old_sup)
       assert Kazi.Daemon.Probe.probe(sock_path) == :alive
@@ -332,7 +303,7 @@ defmodule Kazi.CLI.DaemonTest do
       output =
         capture_io(fn ->
           assert Kazi.CLI.run(
-                   ["daemon", "restart", "--nats-port", Integer.to_string(port2)],
+                   ["daemon", "restart"],
                    daemon_wait: fn _pid -> :ok end
                  ) == 0
         end)

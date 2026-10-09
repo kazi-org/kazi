@@ -608,99 +608,17 @@ kazi memory reject <proposal-ref> [--json]                       # declined, aud
 provenance trailer, ADR-0063); review the diff and land it like any other doc
 change (ADR-0034) -- kazi never commits memory on its own authority.
 
-## The kazi daemon + session bus (ADR-0067)
+## Read-model daemon and agent communication
 
-`kazi daemon start|stop|status [--json]` is the lifecycle for a long-lived,
-per-machine daemon over a local Unix-socket control plane with a version
-handshake, and **convergence never depends on the daemon** (a goal converges
-identically with it down).
+`kazi daemon start|stop|status|restart [--json]` manages the optional local
+read-model writer. It does not launch NATS or provide agent messaging.
+Convergence remains independent of the daemon.
 
-```sh
-kazi daemon start           # foreground; the operator backgrounds it, same as
-                             # `kazi dashboard` -- prints "listening on <sock>"
-                             # then blocks until stopped, and supervises a
-                             # nats-server for the session bus below
-kazi daemon status [--json] # connects, pings, prints the handshake (vsn,
-                             # uptime, pid); a stale socket left by a dead
-                             # daemon is detected and cleaned up, never
-                             # reported as "running"
-kazi daemon stop [--json]   # sends a clean shutdown; exits 1 with a clear
-                             # "no daemon running" line when already down
-```
-
-The socket lives at `~/.kazi/daemon/daemon.sock` (or `$KAZI_STATE_DIR`), a
-pidfile alongside it at `daemon.pid`. Nothing else in kazi starts this daemon
-or reaches into it -- it is opt-in operational infrastructure, not part of the
-`apply` loop.
-
-With the daemon up, `kazi bus post|read|peek|watch|who|tell` (and the matching
-`kazi_bus_post` / `kazi_bus_read` / `kazi_bus_watch` / `kazi_bus_who` /
-`kazi_bus_tell` MCP tools) let concurrent operator sessions and kazi runs
-coordinate -- presence, shared facts, release-window broadcasts, directed
-handoffs -- over a supervised NATS JetStream bus. Every message is advisory,
-provenance-stamped input (never a command channel); every surface reports a
-clean "no daemon" error when the daemon is down. Full concepts, subject
-taxonomy, and the delivery installer: `docs/session-bus.md`.
-
-**Delivery is installed, not documented (ADR-0076).** `kazi install-hooks`
-(opt-in, the sibling of `kazi install-skill`) registers two hooks in the
-Claude Code settings -- SessionStart and UserPromptSubmit run `kazi bus hook
-<event>` -- so bus traffic reaches a session at its turn boundaries without
-anyone polling or being reminded. It merges (never clobbers: an operator's
-own hooks/keys survive byte-identically), re-running is a no-op, and
-`--uninstall` removes exactly what was added; `--local` targets the repo's
-LOCAL (uncommitted) settings file instead of the user-level default. `kazi
-bus hook <event>` itself ALWAYS exits 0 silently -- with no daemon it is an
-instant no-op, so an installed hook can never break or slow a session.
-
-**How to wait: peek vs read vs watch.** Three distinct verbs, three intents:
-
-- **Check without consuming** -- `kazi bus peek` (or `kazi_bus_read` with
-  `peek: true`). Messages are shown but stay pending for the next read.
-- **Consume** -- `kazi bus read` / `kazi_bus_read`. LANDMINE: read ACKS
-  everything it pulls. A casual "let me check the bus" read silently drains
-  messages a later wait was supposed to react to, and the bus then looks
-  quiet. If you are not ready to act on the messages, peek instead.
-- **Wait** -- `kazi bus watch --timeout <s>` / `kazi_bus_watch`. Blocks until a
-  NEW message arrives, and refreshes your presence while parked. `--since`
-  anchors what counts as new: `now` (the default) delivers only messages posted
-  AFTER the watch starts, leaving pending backlog for `read`/`peek`; `all` is
-  the drain-first behavior (T54.9). NEVER poll `read` in a loop -- watch is the
-  no-poll primitive. The CLI exits 3 on timeout; the MCP tool returns
-  `{ok: true, timed_out: true, digest: {total: 0, lines: []}}` -- branch on
-  `timed_out`.
-
-Cadence: check at turn boundaries (peek, or install delivery once with
-`kazi install-hooks` -- see `docs/session-bus.md`); block with a bounded
-`watch` only when you are genuinely waiting on another session.
-
-**The wake contract: how an IDLE session gets woken.** Delivery lands at turn
-boundaries, and an idle session has no next turn -- so a `tell` to an idle
-session just sits `pending` (visible via `bus status <id>`) and nobody is
-woken. Two halves, by the target's state:
-
-- **Target is ACTIVE** -- `kazi bus tell <session> <text> --sev interrupt`. It
-  has a boundary coming, and the digest renders directed/interrupt messages
-  verbatim (ADR-0072).
-- **You are IDLE** -- park `kazi bus watch --timeout <s> --json` as a
-  BACKGROUND TASK of your harness, so its completion re-invokes you. **Arrival
-  (exit 0) is the wake, with the message already in hand** -- the task's output
-  IS the digest, so no follow-up read. **Timeout (exit 3) is a non-event --
-  re-park.** You sleep in between, costing no tokens, and stay `active` on
-  `bus who`. This needs the `--since now` default: with `--since all` a park
-  fires instantly on backlog and degenerates into a poll.
-
-kazi never wakes a session by reaching into it (no prompt injection, no driving
-a TTY) -- that is permanently outside its boundary (ADR-0001/ADR-0076
-non-goals). The harness's background-task mechanic is the supported wake.
-
-**Use harness-native agent teams instead** when the sessions are ones your own
-session SPAWNED (one lead, one machine, one session lifetime): teams already
-deliver messages, keep a roster, and track a dependency-aware task list, so the
-bus adds nothing there. The bus is for the sessions nobody spawned --
-independently-started peers, cross-machine, restart-surviving,
-harness-agnostic, tied to kazi's objective state. **Teams orchestrate the
-workers one session spawns; the bus coordinates the sessions nobody spawned.**
+Use Ajent for agent communication and shared findings. The client lives in
+`../../ajent-social/ajent`; the service lives in `../../ajent-social/ajent-social`.
+Run `ajent setup` to register Ajent's MCP server with your harness. Do not put
+Ajent credentials in goal files or make reconciliation depend on its availability.
+See `docs/ajent.md` for migration and `docs/daemon.md` for daemon operation.
 
 ## Verifying a pooled task with kazi
 
@@ -727,7 +645,7 @@ and added lines. A doc that must quote the forbidden string can carry an inline
 ## See also
 
 - `docs/landing.md` -- landing: `[integration]`/`[conventions]`, the process contract, the Tier-0 `landed` pattern, and the ADR-0055 routing decision.
-- `docs/session-bus.md` -- the session bus: concepts, CLI/MCP surfaces, the delivery installer (ADR-0067/0071).
+- `docs/ajent.md` -- agent communication and migration from the removed session bus.
 - `docs/pool-verification-gate.md` -- the pre-merge verification gate (ADR-0026 L1).
 - `docs/orchestrator-recipe.md` -- the full recipe (source of truth).
 - `docs/schemas/run-result.md`, `docs/schemas/status.md` -- the committed schemas.

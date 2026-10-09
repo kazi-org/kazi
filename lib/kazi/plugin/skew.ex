@@ -18,11 +18,7 @@ defmodule Kazi.Plugin.Skew do
     * `:silent` -- when they match, when no kazi plugin is installed, or when the
       comparison source is unreachable/unreadable (fail-silent, never blocks).
 
-  This rides the EXISTING `Kazi.Bus.Hook` `session-start` machinery (T55.9/ADR-0076):
-  `Kazi.Bus.Hook.session_start/1` calls `check/1` inside the same bounded
-  `Task`, so the file read here is already under the hook's hard wall-clock bound
-  and its fail-silent-on-timeout contract. This module adds NO new hook type and
-  starts NO process of its own -- it is a pure, best-effort read.
+  This check can be called explicitly by plugin tooling. It installs no hooks.
 
   ## Where an installed plugin lives on disk (Claude Code layout)
 

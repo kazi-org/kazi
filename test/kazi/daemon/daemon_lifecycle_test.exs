@@ -1,26 +1,10 @@
 defmodule Kazi.Daemon.LifecycleTest do
-  @moduledoc """
-  T51.1 (ADR-0067 decision point 1): the daemon skeleton's lifecycle contract
-  — process supervision + the Unix-socket control plane. This test starts the
-  supervision tree IN-TEST (`Kazi.Daemon.start/1`), never the released
-  binary, against tmp-scoped socket/pidfile/JetStream-store paths and a
-  per-test nats port, all passed explicitly through `opts` — never the real
-  `~/.kazi/daemon/` a developer's machine might already be using, and never
-  the default nats port (T51.2, ADR-0067 decision point 2, wired
-  `Kazi.Daemon.start/1` to also supervise nats-server unconditionally, so
-  every daemon this test starts needs its own isolated bus store + port).
-
-  `async: false`: real OS sockets and pidfiles are shared, mutable resources
-  (not an Ecto sandbox transaction), so tests run serially to avoid flakiness
-  from overlapping accept loops / file writes.
-  """
   use ExUnit.Case, async: false
 
   alias Kazi.Daemon
   alias Kazi.Daemon.Listener
   alias Kazi.Daemon.Probe
   alias Kazi.Daemon.Write
-  alias Kazi.TestSupport.NatsPrereq
 
   # A throwaway read-model repo for the migrate-before-serve test: a FRESH
   # SQLite file the daemon's boot migration must create the tables in before a
@@ -35,11 +19,6 @@ defmodule Kazi.Daemon.LifecycleTest do
   # brings it up before a write is served.
   defmodule BootRepo do
     use Ecto.Repo, otp_app: :kazi, adapter: Ecto.Adapters.SQLite3
-  end
-
-  setup_all do
-    NatsPrereq.ensure!()
-    :ok
   end
 
   # Short, /tmp-rooted paths -- AF_UNIX socket paths have a small OS-level
@@ -57,15 +36,11 @@ defmodule Kazi.Daemon.LifecycleTest do
   # so no test's supervised nats-server ever touches a developer's real
   # `~/.kazi/daemon/jetstream` or races another test's nats-server for a port.
   defp daemon_opts(sock_path, pid_path) do
-    id = System.unique_integer([:positive])
-
     [
       sock_path: sock_path,
       pid_path: pid_path,
       name: unique_name(:daemon_sup),
-      listener_name: unique_name(:daemon_listener),
-      store_dir: "/tmp/kazi_daemon_test_js_#{id}",
-      port: 20_000 + rem(id, 20_000)
+      listener_name: unique_name(:daemon_listener)
     ]
   end
 
@@ -97,7 +72,11 @@ defmodule Kazi.Daemon.LifecycleTest do
 
   test "start, connect, ping round-trips the version handshake" do
     {sock_path, pid_path} = tmp_paths()
-    start_daemon!(sock_path, pid_path)
+    supervisor = start_daemon!(sock_path, pid_path)
+    children = Supervisor.which_children(supervisor) |> Enum.map(&elem(&1, 0))
+
+    assert Enum.sort(children) ==
+             Enum.sort([Kazi.Daemon.Listener, Kazi.Daemon.Write, Kazi.Daemon.VelocityTicker])
 
     assert File.exists?(sock_path)
     assert File.exists?(pid_path)

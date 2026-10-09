@@ -1,11 +1,8 @@
 defmodule Kazi.Daemon.Supervisor do
   @moduledoc """
-  T51.1 (ADR-0067 decision point 1): the daemon's own supervision tree — today
-  just `Kazi.Daemon.Listener`, the control-socket. Started ONLY via
-  `Kazi.Daemon.start/1` (in turn only reached by `kazi daemon start`); nothing
-  else in the codebase depends on it (ADR-0067: convergence never depends on
-  the bus). Later tasks (T51.2+) add siblings here (the supervised
-  `nats-server` port, etc.) without touching the listener.
+  Supervision for the optional local read-model daemon: socket listener,
+  single writer, and opt-in velocity collector. Started only by `kazi daemon`.
+  Agent messaging is owned by Ajent; no NATS process is started here.
   """
 
   use Supervisor
@@ -20,28 +17,6 @@ defmodule Kazi.Daemon.Supervisor do
     sock_path = Keyword.get(opts, :sock_path, default_sock_path())
     pid_path = Keyword.get(opts, :pid_path, default_pid_path())
     listener_name = Keyword.get(opts, :listener_name, Kazi.Daemon.Listener)
-    nats_name = default_nats_name(opts)
-
-    nats_opts =
-      opts
-      |> Keyword.take([:nats_bin, :port, :store_dir, :nats_host, :nats_token])
-      |> Keyword.put(:name, nats_name)
-
-    # T55.11: the presence sweep (idle-vs-dead liveness for `bus who`). Named
-    # per-supervisor for the same reason as `default_nats_name/1` -- lifecycle
-    # tests run two co-existing trees. `:sweep_interval_ms`/`:sweep_idle_after_s`
-    # are test seams; production uses the sweep's own defaults.
-    sweep_opts =
-      [
-        name: Keyword.get(opts, :sweep_name, default_sweep_name(opts)),
-        nats_name: nats_name
-      ] ++
-        Enum.flat_map(opts, fn
-          {:sweep_interval_ms, v} -> [interval_ms: v]
-          {:sweep_idle_after_s, v} -> [idle_after_s: v]
-          _other -> []
-        end)
-
     # T52.4 (ADR-0068 point 2): migrate-before-serve. The daemon is the ONE and
     # ONLY read-model migrator AND writer (#1019: a mixed migration-writer field
     # is the exact class ADR-0068 closes) -- so BEFORE any child starts we, in
@@ -70,13 +45,6 @@ defmodule Kazi.Daemon.Supervisor do
           |> maybe_put(:repo, Keyword.get(opts, :migrate_repo))
           |> maybe_put(:on_start, Keyword.get(opts, :write_on_start))
 
-        # T67.6 (ADR-0079): the production trigger for the opt-in session-stats
-        # collector. Named per-supervisor (as PresenceSweep/Nats are) so two
-        # co-existing lifecycle-test trees never race for the process name. The
-        # `:velocity_*` keys are test seams (a short interval, a fixture
-        # transcript dir, an injected collector); production uses config +
-        # defaults. Boot never blocks on it -- the first collection is on its
-        # first timer tick, not in its `init/1`.
         velocity_opts =
           [name: default_velocity_ticker_name(opts)] ++
             Enum.flat_map(opts, fn
@@ -90,16 +58,10 @@ defmodule Kazi.Daemon.Supervisor do
             end)
 
         children = [
-          {Kazi.Daemon.Nats, nats_opts},
-          {Kazi.Daemon.PresenceSweep, sweep_opts},
           {Kazi.Daemon.VelocityTicker, velocity_opts},
           {Kazi.Daemon.Write, write_opts},
           {Kazi.Daemon.Listener,
-           sock_path: sock_path,
-           pid_path: pid_path,
-           name: listener_name,
-           sup_pid: self(),
-           nats_name: nats_name}
+           sock_path: sock_path, pid_path: pid_path, name: listener_name, sup_pid: self()}
         ]
 
         Supervisor.init(children, strategy: :one_for_one)
@@ -220,36 +182,9 @@ defmodule Kazi.Daemon.Supervisor do
   def default_pid_path, do: Path.join(daemon_dir(), "daemon.pid")
 
   @doc """
-  The `Kazi.Daemon.Nats` process name `init/1` uses absent an explicit
-  `opts[:nats_name]`: derived from THIS supervisor's own `opts[:name]`
-  (fixed `Kazi.Daemon.Supervisor` in production -- one daemon per machine)
-  rather than a bare module-atom default, so two co-existing supervisor
-  instances (as `daemon_lifecycle_test.exs` deliberately runs, to prove
-  double-start refusal) never race for the same registered process name.
-  Exposed so `Kazi.Daemon.do_start/3` resolves the IDENTICAL name after
-  `Supervisor.start_link/1` returns (it cannot read the child's runtime
-  opts back out any other way).
-  """
-  @spec default_nats_name(keyword()) :: atom()
-  def default_nats_name(opts) do
-    Keyword.get(opts, :nats_name, Module.concat(Keyword.get(opts, :name, __MODULE__), Nats))
-  end
-
-  @doc """
-  The `Kazi.Daemon.PresenceSweep` process name `init/1` uses absent an
-  explicit `opts[:sweep_name]` -- derived from this supervisor's own
-  `opts[:name]` exactly like `default_nats_name/1`, so two co-existing
-  supervisor instances never race for one registered sweep name.
-  """
-  @spec default_sweep_name(keyword()) :: atom()
-  def default_sweep_name(opts) do
-    Module.concat(Keyword.get(opts, :name, __MODULE__), PresenceSweep)
-  end
-
-  @doc """
   The `Kazi.Daemon.Write` process name `init/1` uses absent an explicit
   `opts[:write_name]` -- derived from this supervisor's own `opts[:name]`
-  exactly like `default_nats_name/1`, so two co-existing supervisor instances
+  so two co-existing supervisor instances
   (the double-start lifecycle test) never race for one registered write-server
   name (T52.4).
   """

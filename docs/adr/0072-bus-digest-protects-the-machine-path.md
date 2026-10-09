@@ -1,5 +1,7 @@
 # ADR 0072: The bus digest protects the machine path — context cost is bounded at render, not at post
 
+> Superseded for the session bus on 2026-10-04: kazi messaging was removed in favour of [Ajent](../ajent.md). This document records the historical implementation.
+
 ## Status
 Accepted
 

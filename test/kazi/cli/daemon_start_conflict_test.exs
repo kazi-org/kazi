@@ -43,7 +43,7 @@ defmodule Kazi.CLI.DaemonStartConflictTest do
     # decides the outcome — hermetic, no real nats-server.
     out =
       capture_io(:stderr, fn ->
-        Kazi.CLI.run(["daemon", "start", "--nats-host", "127.0.0.1"], [])
+        Kazi.CLI.run(["daemon", "start"], [])
       end)
 
     # Both versions named: the running daemon's and this binary's.

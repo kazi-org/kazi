@@ -3,7 +3,7 @@
 The single, **versioned** JSON object `kazi portfolio --json` emits to stdout —
 the fleet's sitrep, composed ONLY from kazi's own objective surfaces
 (read-only-projection line, ADR-0011): proposed goals (`list-proposed`), the
-run registry, the attention queue, and the cross-machine bus facts. No manual
+run registry, the attention queue, and the configured remote run facts. No manual
 curation, no new task-management data model — every entry traces to an
 existing objective source (`Kazi.Portfolio.build/0`).
 
@@ -71,7 +71,7 @@ shape.
 | `kind`             | string           | Always `"portfolio"`. |
 | `planned`          | array of objects | Proposals `proposed`/`approved` but not yet applied: `{proposal_ref, goal_id, idea, status}`. Not grouped by repo — a proposal carries no workspace until applied. |
 | `by_repo`          | object           | LOCAL runs (which DO carry a workspace) grouped by repo, then by bucket (`"in_progress"` / `"stuck"` / `"complete"`): `{repo => {bucket => [{goal_ref, run_id, status}]}}`. |
-| `fleet_remote`     | array of objects | Runs in flight on OTHER machines, read from the cross-machine bus facts Mission Control's remote cards use: `{goal_ref, bucket, machine}`. Degrades to `[]` when the daemon is unreachable — never an error (ADR-0011 §2). |
+| `fleet_remote`     | array of objects | Runs in flight on OTHER machines, read from the configured remote run facts Mission Control's remote cards use: `{goal_ref, bucket, machine}`. Defaults to `[]` unless an external fact provider is configured — never an error (ADR-0011 §2). |
 | `totals`           | object           | The five-bucket headline: `{base, empty, rows}`. See [Totals](#totals). |
 | `todo`             | array of objects | Approved proposals with no registered run yet (ready to dispatch): `{proposal_ref, goal_id, idea, status}`. |
 | `blocked`          | array of objects | Stuck/over_budget/error runs plus DAG-blocked roadmap goals, each naming WHY (T64.2). See [Blocked](#blocked). |

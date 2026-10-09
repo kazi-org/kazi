@@ -47,7 +47,7 @@ defmodule Kazi.CLI.DaemonPermanentErrorExitCodeTest do
 
     out =
       capture_io(:stderr, fn ->
-        assert Kazi.CLI.run(["daemon", "start", "--nats-host", "127.0.0.1"],
+        assert Kazi.CLI.run(["daemon", "start"],
                  supervisor_env: %{}
                ) == 1
       end)
@@ -62,7 +62,7 @@ defmodule Kazi.CLI.DaemonPermanentErrorExitCodeTest do
 
     out =
       capture_io(:stderr, fn ->
-        assert Kazi.CLI.run(["daemon", "start", "--nats-host", "127.0.0.1"],
+        assert Kazi.CLI.run(["daemon", "start"],
                  supervisor_env: %{"KAZI_SUPERVISOR" => "launchd"}
                ) == 0
       end)
@@ -78,7 +78,7 @@ defmodule Kazi.CLI.DaemonPermanentErrorExitCodeTest do
 
     out =
       capture_io(:stderr, fn ->
-        assert Kazi.CLI.run(["daemon", "start", "--nats-host", "127.0.0.1"],
+        assert Kazi.CLI.run(["daemon", "start"],
                  supervisor_env: %{"KAZI_SUPERVISOR" => "systemd"}
                ) == 0
       end)
@@ -93,7 +93,7 @@ defmodule Kazi.CLI.DaemonPermanentErrorExitCodeTest do
     FakeDaemonSocket.start!(%{"ok" => true, "vsn" => "1.221.0"}, sock)
 
     capture_io(:stderr, fn ->
-      assert Kazi.CLI.run(["daemon", "start", "--nats-host", "127.0.0.1"],
+      assert Kazi.CLI.run(["daemon", "start"],
                supervisor_env: %{"KAZI_SUPERVISOR" => "bogus"}
              ) == 1
     end)
@@ -105,7 +105,7 @@ defmodule Kazi.CLI.DaemonPermanentErrorExitCodeTest do
 
     out =
       capture_io(fn ->
-        assert Kazi.CLI.run(["daemon", "start", "--nats-host", "127.0.0.1", "--json"],
+        assert Kazi.CLI.run(["daemon", "start", "--json"],
                  supervisor_env: %{"KAZI_SUPERVISOR" => "launchd"}
                ) == 0
       end)

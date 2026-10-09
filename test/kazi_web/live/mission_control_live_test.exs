@@ -397,7 +397,11 @@ defmodule KaziWeb.MissionControlLiveTest do
 
     test "a fact from THIS machine is never rendered as remote (self-exclusion)", %{conn: conn} do
       with_remote_facts([
-        remote_fact("run:abcdef12", Kazi.Bus.hostname(), "started local-goal-not-registered")
+        remote_fact(
+          "run:abcdef12",
+          System.get_env("HOSTNAME", to_string(elem(:inet.gethostname(), 1))),
+          "started local-goal-not-registered"
+        )
       ])
 
       {:ok, _view, html} = live(conn, ~p"/")

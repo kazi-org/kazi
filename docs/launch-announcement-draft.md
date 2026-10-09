@@ -66,7 +66,7 @@ Open source, Apache-2.0. Install:
     kazi install-skill
 
 (or the Claude Code plugin — one marketplace install bundles the skill, MCP
-server, and session-bus hooks.)
+server.)
 
 Repo: https://github.com/kazi-org/kazi · Site: https://kazi.sire.run
 

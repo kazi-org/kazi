@@ -79,7 +79,6 @@ defmodule Kazi.CLI do
   alias Kazi.Reconcile.FirstPassRate
   alias Kazi.Reconcile.GherkinImporter
   alias Kazi.Scope
-  alias Kazi.Teach.InstallHooks
   alias Kazi.Teach.InstallSkill
 
   @typedoc "Process exit code: 0 on convergence, non-zero otherwise."
@@ -118,6 +117,7 @@ defmodule Kazi.CLI do
   # and list its atom on the commands that accept it. `help --json` updates with no
   # extra work.
   @switches [
+    full: :boolean,
     workspace: :string,
     env: :string,
     standing: :boolean,
@@ -128,8 +128,6 @@ defmodule Kazi.CLI do
     with_gist: :boolean,
     out: :string,
     dir: :string,
-    local: :boolean,
-    uninstall: :boolean,
     harness: :string,
     model: :string,
     effort: :string,
@@ -174,24 +172,7 @@ defmodule Kazi.CLI do
     rediscovery: :string,
     port: :integer,
     bind: :string,
-    nats_bin: :string,
-    nats_port: :integer,
-    nats_host: :string,
-    nats_token: :string,
-    topic: :string,
-    sev: :string,
-    scope: :string,
-    peek: :boolean,
-    full: :boolean,
-    team: :string,
-    all: :boolean,
     project: :string,
-    machine: :string,
-    timeout: :integer,
-    since: :string,
-    directed: :boolean,
-    attention: :boolean,
-    prefix: :string,
     roadmap: :string,
     goal: :string,
     into: :string,
@@ -207,17 +188,11 @@ defmodule Kazi.CLI do
 
   @aliases [h: :help, v: :version]
 
-  # T51.2/#1060 (ADR-0067): the `bus` verbs and the valid `post` kinds --
-  # defined here (above `parse/1`) so both the `--help` interception below and
-  # `parse_bus/2` read the SAME lists; no duplicated/drifting copies.
-  @bus_verbs ~w(post read peek who board tell status get watch join leave name hook prune)
-  @bus_kinds ~w(fact announce note intent)
-  @default_bus_kind "fact"
-
   # One-line flag descriptions for the machine surface. Every flag a command lists
   # in `@commands` MUST have an entry here (the help-json test asserts this), so
   # `help --json` never emits a flag with no documentation.
   @flag_docs %{
+    full: "`portfolio`: show the complete per-bucket ledger instead of the bounded sitrep.",
     workspace:
       "Target workspace where edits/integrate/deploy run (falls back to the goal-file's [scope] workspace).",
     env:
@@ -248,12 +223,7 @@ defmodule Kazi.CLI do
       "`init` only: opt THIS repo into the Gist context store — verify `gist doctor`, write .kazi/context.toml, register the `gist serve` MCP server in .mcp.json, and recommend KAZI_GIST_DSN. Project-local only; never touches global config (ADR-0045).",
     out:
       "`init`: output goal-file (default <repo>/kazi.goal.toml). `plan render`: write the generated markdown roadmap plan to this file instead of stdout (T45.5); the file is GENERATED — hand-edits are overwritten on the next render.",
-    dir:
-      "`install-skill` / `install-hooks`: target directory -- the skill directory for `install-skill` (default ~/.claude/skills/kazi), the settings directory for `install-hooks` (default ~/.claude). Injected to a tmp dir in tests.",
-    local:
-      "`install-hooks` only (ADR-0071 decision 3): target the repo's LOCAL, uncommitted .claude/settings.local.json instead of the user-level ~/.claude/settings.json. The installer NEVER writes a committed project settings file (ADR-0034).",
-    uninstall:
-      "`install-hooks` only: remove exactly the hook entries a previous install added -- every other key/entry is preserved, and uninstall right after a fresh install restores the pre-install bytes exactly.",
+    dir: "`install-skill`: target skill directory (default ~/.claude/skills/kazi).",
     harness:
       "Coding harness to drive: claude (default) or opencode. Overrides the goal-file/app config.",
     model:
@@ -308,7 +278,7 @@ defmodule Kazi.CLI do
     context_budget:
       "`apply` only: the per-iteration retrieval budget (bytes) the context store fits snippets into. Default 6000. Ignored without `--context-store`.",
     session_name:
-      "`apply`: a human-readable label for the driving session, recorded on the run's fleet-registry row and shown on the mission control fleet dashboard so concurrent runs are tellable apart. `plan`: the same label, recorded on the proposal so a later `kazi approve`/`kazi apply` (possibly from a DIFFERENT session) can trace a run back to who planned it. `bus` (T55.5): the sender identity every bus verb carries on presence and message headers. Falls back to the KAZI_SESSION_NAME environment variable, then to CLAUDE_CODE_SESSION_ID (auto-detected when kazi runs as a Claude Code subprocess) when the flag is absent; for `bus`, all three absent falls back to a stable derived id (see docs/session-bus.md), elsewhere it leaves the run unlabeled (unchanged behavior).",
+      "Human-readable label for the driving session or drafted proposal. Defaults to KAZI_SESSION_NAME, then CLAUDE_CODE_SESSION_ID.",
     allow_primary_workspace:
       "`apply` only: run against a workspace that is a git repo's PRIMARY (non-linked) worktree anyway. Without this flag, an executing apply refuses such a workspace (issue #937): the dispatched agent's shell can reset/clean the whole checkout, and a primary checkout routinely holds untracked state -- other sessions' files, goal-files, editor config -- that a wipe destroys. Prefer a dedicated task worktree (git worktree add); pass this flag only when you accept that risk (e.g. a throwaway clone). Read-only modes (--check, --explain) never need it.",
     allow_duplicate_run:
@@ -351,43 +321,7 @@ defmodule Kazi.CLI do
       "`dashboard` only: TCP port to bind the standalone fleet-mode web endpoint to. Default 4050.",
     bind:
       "`dashboard` only: interface to bind (default 127.0.0.1 -- loopback only). Set explicitly to bind a non-loopback address; overriding is loud (printed at boot), never silent.",
-    nats_bin:
-      "`daemon start` only (T51.2, ADR-0067 decision point 2): explicit path to the `nats-server` binary the daemon supervises for the session bus. Default: resolved from PATH. Neither found -- `daemon start` fails with one clear line naming the missing binary; the daemon never runs busless.",
-    nats_port:
-      "`daemon start` only (T51.2): TCP port the supervised nats-server binds. Default 4223 (deliberately non-standard -- never collides with an operator's own NATS on 4222). Discovered by bus clients through the daemon's control-socket ping, never guessed.",
-    nats_host:
-      "`daemon start` only (T51.3, ADR-0067 cross-machine): connects to a REMOTE nats-server at this host instead of spawning a local one -- the promised 'or connects to an external one via config'. Needs no local nats-server binary. Combine with --nats-port for the remote's port and --nats-token if the shared bus requires one. See docs/session-bus.md (\"Cross-machine setup\").",
-    nats_token:
-      "`daemon start` only (T51.3): shared auth token for the session bus, e.g. `--nats-token <token>` or `KAZI_NATS_TOKEN`. Optional (default: no auth, today's behavior) -- the machine SPAWNING the bus passes it to nats-server's `-auth`; every machine CONNECTING (`--nats-host`) must pass the SAME token. Without one, a cross-machine bus is unauthenticated on the LAN.",
-    topic:
-      "`bus post` only: an optional free-text topic tag on the posted message (default none).",
-    sev:
-      "`bus post` only: message severity, `info` (default) or `interrupt`. `bus read`'s digest prints `interrupt` messages verbatim; everything else is summarized.",
-    scope:
-      "`bus post`/`bus read`/`bus tell` only: `machine` (default) or `project` (the current repo's canonical toplevel path, slugged) -- which bus subject tree the call addresses.",
-    peek:
-      "`bus read` only (issue #1059): non-destructive -- NAKs instead of acking, so the pending messages are shown but NOT consumed; a subsequent `bus read`/`bus peek` still sees them. Equivalent to `bus peek`.",
-    full:
-      "`portfolio` (E64/T64.3): restore the COMPLETE per-bucket ledger instead of the default bounded sitrep (each bucket's top-3 one-liners + '+N more'); every tracked entry is listed. " <>
-        "`bus read`/`bus peek`/`bus watch` (T55.1, ADR-0072): under --json return EVERY pending message unabridged instead of the default bounded digest -- the documented debugging escape. Without it, --json returns the digest envelope (`kazi schema bus`): verbatim lines only for directed (kind msg) and sev interrupt messages, one-line stubs for bodies over the 1024-byte render threshold, exact count lines per {kind, topic} for everything else, at most 40 lines regardless of backlog size.",
-    team:
-      "`bus who` only (issue #1069): filter the presence roster to members of this named team (sessions register with `bus join <team>`).",
-    all:
-      "`bus who` only: include presence entries older than the 10-minute TTL (hidden by default so closed sessions age out of the roster instead of looking active; a TTL-stale entry whose process is verified alive locally is always shown, as `idle` -- T55.11).",
-    project:
-      "`bus who` (T55.11): filter the roster to sessions whose cwd is this directory or lives under it (expanded to an absolute path) -- replaces the `who | grep <path>` pipeline. `plan` (T45.2, ADR-0054, caller-drafts): instead reads this as a JSON payload naming a multi-goal roadmap (a `goals` array), persisted as N linked proposals sharing one roadmap ref via `Authoring.propose_roadmap/2`; bypasses --discover.",
-    machine:
-      "`bus who` only (T55.11): filter the roster to sessions recorded by this machine (exact hostname match).",
-    timeout:
-      "`bus watch` only (issue #1091): maximum seconds to block waiting for a message (default 300). On expiry `bus watch` prints a one-line notice and exits 3.",
-    since:
-      "`bus watch` only (T54.9, issue #1097): what counts as a NEW message -- `now` (default) anchors to the stream's current last sequence so only messages posted AFTER the watch starts are delivered (pending backlog is left for `bus read`/`bus peek`); `all` restores the pre-T54.9 drain-first behavior (anything already pending returns immediately); a numeric stream sequence anchors there precisely.",
-    directed:
-      "`bus watch` only (issue #1720): wake ONLY on a message addressed to this session (`bus tell <session>`) or, in a team, to its team (`bus tell @<team>`). Without it a park also sleeps on the whole `bus.<scope>.>` subject tree, so any broadcast wakes it -- another session's run-mirroring facts, an `attention-<session>` fact from a permission prompt -- and a parked worker on a busy machine is re-invoked at the fleet's tick rate, which is the poll loop the verb exists to replace. Broadcast traffic is left untouched under this flag: it neither satisfies the watch nor is consumed, staying pending for the next `bus read`/`bus peek`. Recommended for every PARKED watch (`--timeout` + re-park); leave it off for a watch that should see everything on the scope.",
-    attention:
-      "`bus board` only (T60.3, issue #1156): render ONLY the NEEDS OPERATOR section of the human board -- the fleet-wide list of sessions with a live `waiting-on-operator` fact, oldest first. --json is unaffected: the full board (including `attention`) is always returned; this only trims the human render.",
-    prefix:
-      "`bus prune` only (issue #1687): purge every currently-live fact topic starting with this prefix in one shot, instead of naming one exact <topic>. Mutually exclusive with the positional <topic> -- pass exactly one.",
+    project: "`plan`: caller-drafted JSON payload naming a multi-goal roadmap (a goals array).",
     roadmap:
       "`dashboard` only (T47.2, ADR-0056/ADR-0070): path to a goal-file whose declared groups are the roadmap's goal-level `needs` edges. Mission Control loads it through `KaziWeb.Starmap.GoalSource` and GROUPS the fleet grid into needs-DAG wave sections (`Kazi.Goal.DepGraph.frontiers/1`, the SAME computation `kazi apply --explain` prints). Only takes effect on a FRESH standalone boot -- advisory (ignored, with a printed warning) when this process already serves the endpoint, like --port/--bind. Absent, mission control keeps its flat-grid fallback (unchanged behavior). An unloadable goal-file is a loud boot error (non-zero exit), never a silently-empty roadmap.",
     goal:
@@ -488,13 +422,6 @@ defmodule Kazi.CLI do
       flags: [:dir]
     },
     %{
-      name: "install-hooks",
-      summary:
-        "Register the session-bus delivery hooks in the Claude Code settings (opt-in, ADR-0071/T60.3): SessionStart + UserPromptSubmit + Notification run `kazi bus hook <event>`. ALSO arms the ADR-0084 opt-in gate those hooks check (a marker file) -- so this command's hooks work with no second manual step even though a Claude Code plugin install alone no longer arms it. Merge-never-clobber and idempotent -- an operator's own hooks/keys survive byte-identically; `--uninstall` removes exactly what was added (and disarms the gate). Default target is the user-level ~/.claude/settings.json; `--local` targets the repo's LOCAL (uncommitted) .claude/settings.local.json.",
-      args: [],
-      flags: [:dir, :local, :uninstall]
-    },
-    %{
       name: "mcp",
       summary: "Start the kazi MCP server over stdio (the same server `mix kazi.mcp` starts).",
       args: [],
@@ -510,33 +437,9 @@ defmodule Kazi.CLI do
     %{
       name: "daemon",
       summary:
-        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status|restart|reregister` over a local Unix-socket control plane with a version handshake (`status --json` reports `schema_vsn`, the daemon's stamped read-model schema version, for the ADR-0068 skew handshake); `start` also supervises nats-server for the session bus and migrates the read-model ONCE before serving any write (T52.4, migrate-before-serve). `restart` (T52.4) is stop-then-start -- the operator's one-command schema-skew remedy -- and errors clearly if no daemon was running. `reregister` (ADR-0083, #1484, macOS-only) re-pins a registered launchd LaunchAgent's Lightweight Code Requirement against the CURRENT binary -- the remedy after an in-place upgrade leaves the job spawning against stale bytes and launchd refusing to exec it (`last exit code = 78: EX_CONFIG`, launchd's own code, never kazi's); a no-op elsewhere. Convergence never depends on the daemon.",
+        "Lifecycle for the long-lived per-machine kazi daemon (ADR-0067, T51.1/T51.2): `daemon start|stop|status|restart|reregister` over a local Unix-socket control plane with a version handshake (`status --json` reports `schema_vsn`, the daemon's stamped read-model schema version, for the ADR-0068 skew handshake); `start` migrates the read-model ONCE before serving any write (T52.4, migrate-before-serve). `restart` (T52.4) is stop-then-start -- the operator's one-command schema-skew remedy -- and errors clearly if no daemon was running. `reregister` (ADR-0083, #1484, macOS-only) re-pins a registered launchd LaunchAgent's Lightweight Code Requirement against the CURRENT binary -- the remedy after an in-place upgrade leaves the job spawning against stale bytes and launchd refusing to exec it (`last exit code = 78: EX_CONFIG`, launchd's own code, never kazi's); a no-op elsewhere. Convergence never depends on the daemon.",
       args: [%{name: "subcommand", required: true}],
-      flags: [:json, :nats_bin, :nats_port, :nats_host, :nats_token]
-    },
-    %{
-      name: "bus",
-      summary:
-        "Session bus verbs (ADR-0067, T51.2): `bus post|read|peek|who|board|tell|status|get|watch|join|leave|name|hook|prune` over the daemon-supervised NATS JetStream bus. Requires a running `kazi daemon` -- each verb prints a one-line no-daemon error (exit 1) when it isn't. `bus <verb> --help` prints that verb's own usage. `bus post` with no <kind> defaults to `fact`; an explicit unknown kind is a usage error enumerating the valid kinds. `bus board` (T55.4/T55.8, ADR-0073) renders CURRENT STATE -- last-value fact per topic + the live roster + claim ownership read live from refs/claims/* -- cursor-free and idempotent (consumes nothing, safe to read every turn), bounded by the same digest rules as read; `attention-*` topics never appear in its `facts` section (issue #1687) -- they have their own roster-gated `attention` section, and a `\"none\"` clear still leaves the topic in the stream, so showing it in `facts` too was pure noise. `bus watch` blocks until a NEW message arrives (issues #1091/#1097; `--since <seq|now|all>` anchors what counts as new, exit 3 on timeout; `--directed` (issue #1720) wakes ONLY on a message addressed to this session or its team, leaving broadcast scope traffic unconsumed for the next `bus read` -- the recommended flag for a parked watch); `bus join` (argless, T65.1/#1430: DERIVES the team from the git origin as a `t-<host>-<org>-<repo>` slug -- a fixed `t-` prefix so no team slug can begin with `-`; `bus join -- <team>` is the explicit cross-repo override, recorded `derived=false`; join also returns a daemon-ASSIGNED short name `<team>-a/b/c...` allocated atomically through the KV bucket, T65.3)/`bus leave` manage team membership (issue #1069), with `bus tell @<team>` fanning out to members and `bus who --team <t>` filtering the roster. `bus tell` prints the message's id and `bus status <id>` answers `pending|consumed` from the recipient's ack state, while `bus who` shows each session's un-read inbox depth (T55.12) -- a tell's success means QUEUED, never seen. `bus read|peek|watch --json` return the bounded DIGEST by default (T55.1, ADR-0072; shape via `kazi schema bus`); `--full` is the documented escape returning every message unabridged. `bus get <id>` is the deliberate pull for a stubbed body (ADR-0072 d3): a direct stream fetch by id that consumes NOTHING (no cursor disturbed), printing a bounded preview by default and the whole body under `--full`. `bus prune <topic>` (issue #1687 root cause 2) erases every message on a fact topic outright -- the retract verb the facts stream never had, since a `\"none\"` clear only appends a new last-value message and the topic (and its whole history) stays in the stream until the 30-day `max_age` rolls off; `bus prune --prefix <prefix>` purges every currently-live topic starting with the prefix in one shot (a NATS subject wildcard cannot glob inside a single token, so a bulk cleanup like `--prefix attention-` needs this rather than a wildcard filter).",
-      args: [%{name: "subcommand", required: true}],
-      flags: [
-        :json,
-        :topic,
-        :sev,
-        :scope,
-        :peek,
-        :full,
-        :team,
-        :all,
-        :project,
-        :machine,
-        :timeout,
-        :since,
-        :directed,
-        :session_name,
-        :attention,
-        :prefix
-      ]
+      flags: [:json]
     },
     %{
       name: "economy",
@@ -677,7 +580,6 @@ defmodule Kazi.CLI do
       kazi economy --rediscovery <goal> [--json]   # ranked rediscovery-pressure report (ADR-0058)
       kazi init <repo-dir> [--out <file>] [--discover] [--enrich] [--with-mcp] [--with-gist]
       kazi install-skill [--dir <path>]           # write the Claude Code skill (opt-in)
-      kazi install-hooks [--local] [--uninstall]  # register session-bus delivery hooks (opt-in, ADR-0071) + arm the ADR-0084 opt-in gate they check
       kazi mcp                                     # start the MCP server over stdio (ADR-0044)
       kazi dashboard [--port <n>] [--bind <ip>] [--roadmap <goal-file>]  # standalone fleet-mode web endpoint (read-only mission control, ADR-0057)
       kazi plan "<idea>" [--workspace <path>] [--yes] [--strict] [--adr] [--json]
@@ -699,23 +601,11 @@ defmodule Kazi.CLI do
       kazi memory list-proposed [--status <state>] [--json]           # harvested memory proposals (ADR-0063)
       kazi memory approve <proposal-ref> [--json]                     # promote into its routed corpus file
       kazi memory reject <proposal-ref> [--json]                      # decline (kept for audit)
-      kazi daemon start [--nats-bin <path>] [--nats-port <n>]  # boot the session-bus daemon (foreground)
-      kazi daemon status [--json]                  # ping the running daemon (--json includes schema_vsn, the daemon's read-model schema version, and nats_health -- the nats-server restart-loop/bind-conflict watchdog, #1684)
+      kazi daemon start                           # boot the read-model daemon (foreground)
+      kazi daemon status [--json]                  # ping the running daemon (--json includes schema_vsn, the daemon's read-model schema version,)
       kazi daemon stop                             # clean shutdown
-      kazi daemon restart [--nats-bin <path>] [--nats-port <n>]  # stop-then-start (schema-skew remedy); errors if none was running
+      kazi daemon restart  # stop-then-start (schema-skew remedy); errors if none was running
       kazi daemon reregister [--json]              # re-pin a launchd job's code requirement to the CURRENT binary (remedy for exit 78 after an in-place upgrade, #1484); macOS-only, no-op elsewhere
-      kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]  # <kind> defaults to `fact`
-      kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
-      kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--directed] [--json]  # block until a NEW message arrives (#1091/#1097); --directed: only messages addressed to this session/team (#1720)
-      kazi bus join [--json]                             # derive team from git origin + daemon-assigned name (T65.1/T65.3); `join -- <team>` for explicit
-      kazi bus leave [--json]
-      kazi bus name <alias> [--json]                     # attach an alias on top of the assigned name (T55.5/T65.3)
-      kazi bus read [--peek] [--since <cursor>] [--json]   # --peek: show pending messages WITHOUT consuming them; --since <seq>: replay from a point
-      kazi bus peek [--json]                       # non-destructive read (issue #1059)
-      kazi bus who [--team <t>] [--project <dir>] [--machine <host>] [--all] [--json]   # roster with liveness (active|idle)
-      kazi bus board [--scope machine|project] [--json]   # current state: facts + roster + claim ownership (T55.4/T55.8)
-      kazi bus hook <event>                        # harness hook entry point (session-start | turn | notification) -- ALWAYS exits 0 silently; no-op unless the ADR-0084 opt-in gate is armed (KAZI_BUS_HOOKS=1, or `kazi install-hooks`)
-      kazi bus <verb> --help                       # per-verb usage
       kazi help [--json]                          # --json: the command/flag surface
       kazi schema [<command>]                      # --json result schema(s), a provider schema (custom_script), or an artifact schema (roadmap)
 
@@ -744,22 +634,8 @@ defmodule Kazi.CLI do
                              workspace.
       --out <path>           `init` output goal-file (default
                              <repo>/kazi.goal.toml).
-      --dir <path>           `install-skill` / `install-hooks`: target directory
-                             — the skill directory for `install-skill` (default
-                             ~/.claude/skills/kazi), the settings directory for
-                             `install-hooks` (default ~/.claude). Opt-in,
-                             consent-first — a normal `kazi` run never writes to
-                             ~/.claude (ADR-0024/0071). Injected to a tmp dir in
-                             tests.
-      --local                `install-hooks` only (ADR-0071): target the repo's
-                             LOCAL, uncommitted .claude/settings.local.json
-                             instead of the user-level ~/.claude/settings.json.
-                             The installer NEVER writes a committed project
-                             settings file (ADR-0034).
-      --uninstall            `install-hooks` only: remove exactly the hook
-                             entries a previous install added. Every other
-                             key/entry is preserved; run right after a fresh
-                             install it restores the pre-install bytes exactly.
+      --dir <path>           `install-skill`: target skill directory (default
+                             ~/.claude/skills/kazi).
       --enrich               `init` only: opt into harness enrichment (OFF by
                              default) to propose live predicates from discovered
                              endpoints. The deterministic detection always stands.
@@ -959,14 +835,7 @@ defmodule Kazi.CLI do
       `plan`:
       --session-name <name>  Label the drafted proposal and later run.
       --tree                 `plan render` only: write scoped AGENTS.md goal nodes.
-      `daemon start`:
-      --nats-host <host>     Connect to an existing NATS server instead of starting one.
-      --nats-token <token>   Authenticate to the session bus NATS server.
-      `bus board`:
-      --attention            Show only sessions waiting for operator attention.
-      `bus prune`:
-      --prefix <prefix>      Remove live fact topics beginning with this prefix.
-
+      --full                 `portfolio`: show the complete ledger.
       --help, -h             Show this help and exit.
       --version, -v          Print the kazi version and exit.
 
@@ -979,7 +848,6 @@ defmodule Kazi.CLI do
       kazi init ./my-service --with-mcp            # also write .mcp.json (canonical kazi MCP config)
       kazi init ./my-service --with-gist           # opt this repo into the Gist context store (ADR-0045)
       kazi install-skill
-      kazi install-hooks                           # opt into session-bus delivery (ADR-0071) + arm the ADR-0084 opt-in gate; --uninstall reverts both
       kazi mcp                                     # an MCP client runs this as its server command
       kazi apply my.goal.toml --workspace ./svc --json --stream
       kazi status cli-e2e --json
@@ -1053,13 +921,6 @@ defmodule Kazi.CLI do
         emit(json?(flags), help_json(), fn -> IO.puts(@usage) end)
         0
 
-      {:bus_help, verb} ->
-        # #1060: per-verb `bus <verb> --help` -- always human prose (a `--help`
-        # request has no accompanying `--json` intent here; `bus_help_text/1`
-        # is the single source both this and `docs/session-bus.md` describe).
-        IO.puts(bus_help_text(verb))
-        0
-
       {:schema, command, _flags} ->
         # T16.1 (ADR-0024 decision 2): emit the versioned result schema(s) for
         # `--json` output. `schema` is JSON-only — it has no human prose surface —
@@ -1094,9 +955,6 @@ defmodule Kazi.CLI do
       {:install_skill, opts} ->
         execute_install_skill(opts, inject_opts)
 
-      {:install_hooks, opts} ->
-        execute_install_hooks(opts, inject_opts)
-
       {:mcp, _opts} ->
         execute_mcp(inject_opts)
 
@@ -1105,9 +963,6 @@ defmodule Kazi.CLI do
 
       {:daemon, subcommand, args, opts} ->
         execute_daemon(subcommand, args, opts, inject_opts)
-
-      {:bus, subcommand, args, opts} ->
-        execute_bus(subcommand, args, opts)
 
       {:propose, idea, opts} ->
         execute_propose(idea, opts, inject_opts)
@@ -1167,12 +1022,9 @@ defmodule Kazi.CLI do
           | {:portfolio, keyword()}
           | {:init, Path.t(), keyword()}
           | {:install_skill, keyword()}
-          | {:install_hooks, keyword()}
           | {:mcp, keyword()}
           | {:dashboard, keyword()}
           | {:daemon, String.t(), [String.t()], keyword()}
-          | {:bus, String.t(), [String.t()], keyword()}
-          | {:bus_help, String.t()}
           | {:propose, String.t(), keyword()}
           | {:plan_render, Path.t(), keyword()}
           | {:plan_lint, Path.t(), keyword()}
@@ -1237,13 +1089,6 @@ defmodule Kazi.CLI do
       OptionParser.parse(normalize_parallel(argv), strict: @switches, aliases: @aliases)
 
     cond do
-      # #1060: `kazi bus <verb> --help` prints that VERB's own usage (signature +
-      # flags + enumerated kinds), not the generic block below -- intercepted
-      # here, ahead of the generic `flags[:help]` branch, since `--help` sets
-      # `flags[:help]` regardless of its position in argv.
-      flags[:help] && match?(["bus", verb | _] when verb in @bus_verbs, positionals) ->
-        {:bus_help, Enum.at(positionals, 1)}
-
       flags[:help] ->
         {:help, flags}
 
@@ -1394,24 +1239,6 @@ defmodule Kazi.CLI do
     end
   end
 
-  # T55.2 (ADR-0071 decisions 1/3/6): `kazi install-hooks` registers the
-  # session-bus delivery hooks (SessionStart + UserPromptSubmit -> `kazi bus
-  # hook <event>`) in the Claude Code settings. OPT-IN/consent-first, the same
-  # contract as `install-skill`: only this explicit command writes harness
-  # config; a normal `kazi` run never touches it. `--dir` targets a tmp dir in
-  # tests; `--local` targets the LOCAL (uncommitted) settings.local.json;
-  # `--uninstall` removes exactly what an install added.
-  defp parse_command(["install-hooks" | rest], flags) do
-    case rest do
-      [] ->
-        {:install_hooks,
-         dir: flags[:dir], project: flags[:local] || false, uninstall: flags[:uninstall] || false}
-
-      extra ->
-        {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
-    end
-  end
-
   # T33.1 (ADR-0044): `kazi mcp` starts the MCP server over stdio — the SAME
   # `Kazi.MCP.Server` that `mix kazi.mcp` starts, shared via `Kazi.MCP.Stdio`.
   # It is a long-running stdio server, NOT a `--json` command: it takes no flags
@@ -1442,7 +1269,6 @@ defmodule Kazi.CLI do
   # plane. Wired like `dashboard`/`memory` above: a required subcommand, no
   # positional args beyond it, `--json` carried through.
   defp parse_command(["daemon" | rest], flags), do: parse_daemon(rest, flags)
-  defp parse_command(["bus" | rest], flags), do: parse_bus(rest, flags)
 
   # T3.5c authoring: `plan "<idea>"` drafts a goal from a prose idea. The idea
   # is a single positional argument (quote it in the shell); only --workspace is
@@ -1565,11 +1391,6 @@ defmodule Kazi.CLI do
   defp parse_command(["lint"], _flags),
     do: {:error, "the `lint` command requires a <goal-file> argument"}
 
-  # T40.2 (ADR-0050): `spec import <feature-file>... --into <goal-file>` exposes
-  # `Kazi.Reconcile.GherkinImporter` as a CLI entrypoint — the sub-verb shape
-  # mirrors `context`/`memory`/`bus`. `--into` (the target goal-file) is required;
-  # one or more `.feature` positionals follow the `import` sub-verb. --json carries
-  # through so the upserted predicate ids emit as one object (ADR-0023).
   defp parse_command(["spec" | rest], flags), do: parse_spec(rest, flags)
 
   # T35.7 (ADR-0045): `context index|search|stats` — a THIN wrapper over the
@@ -1605,7 +1426,7 @@ defmodule Kazi.CLI do
   defp parse_command([other | _], _flags),
     do:
       {:error,
-       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `install-hooks`, `mcp`, `dashboard`, `daemon`, `bus`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `economy`, `schema`, or `help`)"}
+       "unknown command #{inspect(other)} (try `apply`, `status`, `init`, `install-skill`, `mcp`, `dashboard`, `daemon`, `plan`, `list-proposed`, `approve`, `reject`, `export`, `lint`, `context`, `economy`, `schema`, or `help`)"}
 
   defp parse_command([], _flags),
     do: {:error, "no command given (expected `apply <goal-file> --workspace <path>`)"}
@@ -1732,12 +1553,7 @@ defmodule Kazi.CLI do
   defp parse_daemon([sub | rest], flags) when sub in @daemon_subcommands do
     case rest do
       [] ->
-        {:daemon, sub, [],
-         json: flags[:json] || false,
-         nats_bin: flags[:nats_bin],
-         nats_port: flags[:nats_port],
-         nats_host: flags[:nats_host],
-         nats_token: flags[:nats_token] || System.get_env("KAZI_NATS_TOKEN")}
+        {:daemon, sub, [], json: flags[:json] || false, json: flags[:json] || false}
 
       extra ->
         {:error, "unexpected argument(s): #{Enum.join(extra, " ")}"}
@@ -1754,511 +1570,6 @@ defmodule Kazi.CLI do
       {:error,
        "the `daemon` command requires a <subcommand> (`start`, `stop`, `status`, `restart`, `reregister`)"}
 
-  # T51.2 (ADR-0067 decision point 4)/#1060: `bus post|read|peek|who|tell` --
-  # `post`/`tell` take a required positional (kind+text, or session+text);
-  # `read`/`peek`/`who` take none. Validated further in `execute_bus/3` (arg
-  # counts differ per verb; `post`'s <kind> is validated/defaulted there too).
-  defp parse_bus([sub | rest], flags) when sub in @bus_verbs,
-    do: {:bus, sub, rest, bus_flags(flags)}
-
-  defp parse_bus([sub | _], _flags),
-    do:
-      {:error,
-       "unknown bus subcommand #{inspect(sub)} (expected `post`, `read`, `peek`, `who`, `board`, `tell`, `status`, `get`, `watch`, `join`, `leave`, `name`, `hook`, `prune`)"}
-
-  defp parse_bus([], _flags),
-    do:
-      {:error,
-       "the `bus` command requires a <subcommand> (`post`, `read`, `peek`, `who`, `board`, `tell`, `status`, `get`, `watch`, `join`, `leave`, `name`, `hook`, `prune`)"}
-
-  defp bus_flags(flags) do
-    [
-      json: flags[:json] || false,
-      topic: flags[:topic],
-      sev: flags[:sev] || "info",
-      scope: flags[:scope] || "machine",
-      peek: flags[:peek] || false,
-      full: flags[:full] || false,
-      team: flags[:team],
-      all: flags[:all] || false,
-      project: flags[:project],
-      machine: flags[:machine],
-      timeout: flags[:timeout],
-      since: flags[:since],
-      # Issue #1720: `bus watch` only -- park on the directed and team
-      # subjects ONLY, so broadcast scope traffic neither wakes the watch nor
-      # is consumed (it stays pending for the next `bus read`).
-      directed: flags[:directed] || false,
-      # T55.5: an explicit --session-name heads the sender-identity resolution
-      # chain (ADR-0067 point 2) for every bus verb.
-      session_name: flags[:session_name],
-      # T60.3: `bus board` only -- trims the HUMAN render to the NEEDS
-      # OPERATOR section; --json is unaffected (bus_flags is shared across
-      # every verb, so this is simply ignored by every other verb).
-      attention: flags[:attention] || false,
-      # Issue #1687: `bus prune` only -- the bulk retract path, purging every
-      # currently-live topic starting with this prefix.
-      prefix: flags[:prefix]
-    ]
-  end
-
-  # #1060: the one-line usage error for an explicit, unrecognized `bus post` kind
-  # -- enumerates the valid kinds so the failure is self-documenting.
-  @spec unknown_bus_kind_error(String.t()) :: String.t()
-  defp unknown_bus_kind_error(kind),
-    do:
-      "unknown bus kind #{inspect(kind)} (expected one of: #{Enum.join(@bus_kinds, ", ")}; omit <kind> to default to #{@default_bus_kind})"
-
-  # #1060: per-verb `bus <verb> --help` usage text -- the single source both
-  # `run/2`'s `{:bus_help, verb}` branch and `docs/session-bus.md` describe.
-  @spec bus_help_text(String.t()) :: String.t()
-  defp bus_help_text("post") do
-    """
-    kazi bus post [<kind>] <text> [--topic <t>] [--sev info|interrupt] [--scope machine|project] [--json]
-
-    Publish `text` to the session bus. <kind> is OPTIONAL and defaults to
-    `#{@default_bus_kind}`; an explicit <kind> must be one of: #{Enum.join(@bus_kinds, ", ")}.
-    Directed sends use `bus tell` (kind `msg` is reserved). `text` over 1024
-    bytes is rejected client-side before any daemon connection is attempted.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("tell") do
-    """
-    kazi bus tell <session>|<nickname>|@<team> <text> [--sev info|interrupt] [--scope machine|project] [--json]
-
-    Publish `text` directed at a recipient -- only that session's `bus read`/
-    `bus peek`/`bus watch` sees it, regardless of either side's --scope (issue
-    #1065). The recipient resolves in order (T55.5, ADR-0073): an @-prefixed
-    team name (every member receives it, issue #1069), an exact session id on
-    the roster, then a nickname assigned with `bus name`. `text` over 64 KiB is
-    rejected client-side.
-
-    Prints the message's id (T55.12) -- `bus status <id>` answers what became
-    of it. Success here means STORED AND QUEUED, not seen: the bus is
-    advisory, and a live recipient is always free to ignore a message.
-
-    Unaddressable and unlikely-to-be-read recipients differ (T55.12):
-
-      * no presence row AND no durable inbox -- a one-line ERROR naming the
-        live roster; nothing is sent.
-      * a row whose liveness is `dead-reaping` (T55.11), or no row but a
-        durable inbox left over from before it aged out -- a WARNING on
-        stderr, and the message is queued anyway. The verdict comes from the
-        recipient's machine sweep, and the operator may know better (a session
-        restarting under the same name); refusing here would trade a silent
-        send for a silent refusal. Confirm with `bus status <id>`.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("status") do
-    """
-    kazi bus status <id> [--json]
-
-    Answer what became of the directed message `<id>` (the id `bus tell`
-    prints) -- read from the RECIPIENT's durable consumer ack state (T55.12):
-
-      * `pending` -- stored and queued, but not acked: the recipient has not
-        read yet, or only peeked (a peek never consumes).
-      * `consumed` -- the recipient's `bus read` acked it. Delivered AND
-        drained, which is as far as the bus can honestly see; whether the
-        session acted on it is not something an ack can know.
-
-    For a `tell @<team>` fan-out, `recipients` breaks the verdict out per
-    member and the top-line state is `consumed` only once EVERY live member
-    acked. Consumes nothing -- checking a message's status never disturbs the
-    recipient's cursor, so it is safe to poll.
-
-    An id that is not in the stream (never posted, or aged out of the 30-day
-    retention) is a one-line error, as is an id naming a broadcast `bus post`
-    -- delivery status needs one recipient whose ack state can answer for it.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("get") do
-    """
-    kazi bus get <id> [--full] [--json]
-
-    Fetch the FULL body of the message `<id>` (the JetStream stream sequence a
-    digest line or stub carries) -- the deliberate pull for a stubbed body
-    (T55.6, ADR-0072 decision 3). When the digest collapses a large body into a
-    one-line stub, this is how a session that has decided the body is worth the
-    context spends it, on purpose.
-
-    A direct stream GET by id -- NO consumer, so `get` consumes NOTHING and
-    never advances anyone's read cursor: a subsequent `bus read` still delivers
-    that same message normally. Contrast `bus read`, which acks and consumes.
-
-    Prints the message's id/kind/topic/size header, then its body. By default
-    the body is bounded to a cheap 1024-byte preview (the same threshold that
-    stubbed it); `--full` prints it unabridged. Under --json the result is a
-    versioned envelope `{ok, schema_version, message: {id, scope, kind, topic,
-    sev, session, machine, ts, bytes, text, truncated}}` (`truncated` is true
-    when the default preview cut the body; `--full` returns the whole `text`).
-
-    An id that is not in the stream (never posted, or aged out of the 30-day
-    retention) is a one-line error, never a crash.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("read") do
-    """
-    kazi bus read [--peek] [--full] [--since <cursor>] [--json]
-
-    Pull and ACK this session's durable consumer -- prints a digest. The
-    DAEMON assembles that digest (T55.7, ADR-0072 d5): it pulls the consumer,
-    aggregates, and enforces the bound server-side, so the CLI, the MCP tools,
-    and the installed hook all render the same bytes and a deep backlog costs
-    the same as a shallow one.
-
-    Under --json the SAME digest is the default (T55.1, ADR-0072), as a
-    versioned envelope (schema_version; shape via `kazi schema bus`): verbatim
-    lines only for directed (kind `msg`) and `sev: interrupt` messages,
-    one-line stubs for bodies over the 1024-byte render threshold (ALL kinds
-    -- the body stays in the stream, addressable by its `id`), exact count
-    lines per {kind, topic} for everything else -- carrying the LAST value for
-    a `fact` topic, since a fact states what is true now -- bounded to 40
-    lines regardless of backlog size. Every message and digest line carries
-    the message's JetStream stream sequence as its public `id`.
-
-    `--full` is the documented escape: every pending message unabridged. It is
-    the one mode the daemon does not assemble (there is no digest to assemble,
-    and its size is unbounded), so it reads the consumer directly.
-
-    `--peek` (issue #1059) makes the read NON-DESTRUCTIVE: pending messages
-    are shown but not consumed, so a subsequent `bus read`/`bus peek` still
-    sees them. Equivalent to `bus peek`.
-
-    `--since <cursor>` (T55.7) replays from a point: consume only messages
-    whose `id` is past <cursor>, leaving everything at or before it pending
-    for a later read. A debugging escape -- `<cursor>` is a numeric stream
-    sequence (`now`/`all` are `bus watch` anchors and are not accepted here).
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("peek") do
-    """
-    kazi bus peek [--full] [--json]
-
-    Non-destructive read (issue #1059): shows this session's pending messages
-    WITHOUT consuming them -- a subsequent `bus peek`/`bus read` still sees
-    them. Equivalent to `bus read --peek`. Under --json it returns the same
-    bounded digest envelope as `bus read` (T55.1, ADR-0072; shape via
-    `kazi schema bus`); `--full` returns every message unabridged.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("who") do
-    """
-    kazi bus who [--team <name>] [--project <dir>] [--machine <host>] [--all] [--json]
-
-    List current presence (session, machine, pid, liveness, team, inbox depth,
-    last-seen age, cwd) from the short-TTL KV bucket every bus call upserts
-    into.
-
-    Inbox depth (T55.12): `inbox=N` counts the DIRECTED messages queued and
-    un-read for that session (its own tells plus its team's fan-out) -- shown
-    only when non-zero on the TTY, always present under --json. A depth that
-    climbs against a live session means tells are landing but nobody is
-    draining them; against a `dead-reaping` one, it is the backlog a
-    replacement session will never see. Broadcast (`bus post`) traffic is not
-    counted -- inbox answers "how many messages addressed to this session are
-    waiting".
-
-    Liveness (T55.11): `active` -- the session itself made a bus call
-    recently; `idle` -- its process is verified alive on its machine but
-    quiet (the daemon's presence sweep re-heartbeats such rows, so an alive
-    session never ages out of the roster); `dead-reaping` -- its pid is
-    verifiably gone or was reused by a different process (rows record pid +
-    process start time), and the sweep removes the row on its next pass.
-
-    Entries idle past the presence TTL (#{Kazi.Bus.session_ttl_s()} seconds)
-    with no verifiably-alive process are hidden -- closed sessions age out
-    instead of looking active; pass --all to include them. Under --json the
-    result carries `ttl_s` and each session's `seen_s`.
-
-    --team <name> filters to that team's members (issue #1069);
-    --project <dir> filters to sessions whose cwd is <dir> or under it;
-    --machine <host> filters to sessions on that machine.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("board") do
-    """
-    kazi bus board [--scope machine|project] [--attention] [--json]
-
-    Render the CURRENT STATE of the bus (ADR-0073): the last-value `fact` per
-    topic, the live roster (names, teams, liveness), and claim ownership in one
-    shot. Where `read`/`peek`/`watch` answer "what CHANGED since I last looked"
-    -- a delta of pending messages -- the board answers "what is true right now".
-
-    CURSOR-FREE and idempotent: unlike `read`, the board CONSUMES NOTHING and
-    keeps no cursor, so a session may call it every turn (it is what a
-    session-start hook injects) without draining a message a later `read`/`watch`
-    was counting on. Posting three facts on one topic shows ONE line -- the
-    latest value, not three.
-
-    Bounded by the same digest rules as `read` (ADR-0072): an oversize fact body
-    renders as a one-line stub carrying its id (the body stays addressable in the
-    stream), and the fact section is at most 40 lines regardless of topic count,
-    the tail folding into one overflow line. Under --json: `{ok, schema_version,
-    board: {facts, roster, claims, claims_available, total_facts,
-    total_sessions, total_claims}}` (shape: `kazi schema bus`).
-
-    The `claims` section (T55.8, ADR-0073 point 2) is a live projection of
-    `refs/claims/*` read at source -- `{task, owner, host, age_s}` per claim,
-    with NO daemon in that path. When the claim remote is unreachable it degrades
-    to one honest line ("claims: unavailable (remote unreachable)",
-    `claims_available:false` under --json) rather than a possibly-stale table.
-
-    --scope machine (default) or project selects which bus subject tree to
-    project. The facts and roster need a running `kazi daemon` -- `bus board`
-    prints a one-line no-daemon error (exit 1) otherwise.
-
-    NEEDS OPERATOR (T60.3, issue #1156): the same fact section also surfaces a
-    fleet-wide attention view -- any session whose `Notification` hook fired
-    (a harness blocked on a human) has a `waiting-on-operator: <summary>
-    (since <ts>)` fact on its own `attention-<session>` topic, and the SAME
-    session's `turn` hook clears it (posts `"none"`) on its very next prompt,
-    so a resumed session drops out again automatically. Under --json this is
-    always present as `board.attention` (oldest-waiting first) and
-    `board.total_attention`, alongside the unchanged `facts`/`roster`. --attention
-    trims the HUMAN render to ONLY this section (--json is unaffected -- the
-    full board is always returned).
-
-    `attention-*` topics NEVER appear in `facts`/`total_facts` (issue #1687)
-    -- they only ever render in the `attention` section above, waiting or
-    cleared alike, so a stale/dead session's topic cannot flood the facts
-    window a `session-start` hook injects. `facts` is also ordered by
-    RECENCY (newest first) before the 40-line bound applies, not by topic
-    name. See `bus prune` to erase an accumulated topic outright.
-    """
-  end
-
-  defp bus_help_text("watch") do
-    """
-    kazi bus watch [--timeout <seconds>] [--since <seq|now|all>] [--directed] [--full] [--json]
-
-    Block until a NEW message arrives for this session, then consume and
-    print it -- the no-poll-loop alternative to running `bus read` in a
-    loop (issue #1091). The call sleeps on the session's scope, directed,
-    and team subjects and wakes on the first arrival. Default timeout 300
-    seconds; on expiry prints a one-line notice and exits 3, so scripts
-    can always tell a timeout from an arrival. Under --json the result
-    renders through the same bounded digest envelope as `bus read`
-    (T55.1, ADR-0072); `--full` returns the messages unabridged.
-
-    --directed narrows WHOSE message counts (issue #1720): sleep only on
-    `bus tell <session>` and `bus tell @<team>`, never on the scope's
-    broadcast tree. Without it any broadcast wakes the park -- another
-    session's run-mirroring facts, an `attention-<session>` fact raised by
-    a permission prompt -- so on a busy machine a parked worker is
-    re-invoked at the fleet's tick rate on traffic addressed to nobody.
-    Broadcasts are left alone under the flag: they neither satisfy the
-    watch nor get consumed, and stay pending for the next `bus read`.
-    Pass it on every parked watch; omit it when the watch should see
-    everything on the scope.
-
-    --since anchors what counts as new (T54.9, issue #1097):
-      now   (default) only messages posted AFTER the watch starts; any
-            backlog already pending (e.g. shown by an earlier `bus peek`)
-            never satisfies the watch and stays consumable by
-            `bus read`/`bus peek`.
-      all   the drain-first behavior: anything already pending, backlog
-            included, returns immediately.
-      <seq> a numeric stream sequence to anchor at precisely -- pending
-            messages with a greater sequence return immediately.
-
-    Watching also refreshes this session's presence, so a watcher never
-    ages out of `bus who`.
-
-    The wake contract (T55.13): an IDLE session has no turn boundary to
-    deliver into, so park this verb as a BACKGROUND TASK of your harness --
-    arrival (exit 0) wakes the session with the message already in hand,
-    timeout (exit 3) means re-park. Keep the `--since now` default and add
-    `--directed`: with `--since all` a park fires instantly on backlog, and
-    without `--directed` it fires on every broadcast on the machine -- both
-    degenerate into the poll loop this verb exists to replace. Full
-    contract, and when to use harness-native agent teams instead:
-    `docs/session-bus.md`.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("join") do
-    """
-    kazi bus join [--json]                # derive the team from git origin
-    kazi bus join -- <team> [--json]      # explicit team (cross-repo override)
-
-    Register this session under a team. ARGLESS (T65.1, #1430): the team is
-    DERIVED from the workspace's `git remote get-url origin` -- ssh/https/scp
-    forms of one repo normalize to a single `t-<host>-<org>-<repo>` slug, so
-    two checkouts (or machines) of the same repo land in the SAME team with no
-    typed string. The fixed `t-` prefix means a team slug can never begin with
-    `-`. With no origin remote the team falls back to the repo-root path slug
-    (still `t-` prefixed) with a one-line machine-local notice.
-
-    An explicit `bus join -- <team>` still works verbatim (existing teams keep
-    functioning) and is recorded `derived=false` -- the deliberate cross-repo
-    override. `bus who --team <team>` lists members and `bus tell @<team>
-    <text>` reaches every member's read/peek/watch. Membership survives across
-    bus calls and ages out with presence (rejoin after long idles); `bus
-    leave` clears it.
-
-    DAEMON-ASSIGNED NAME (T65.3, #1430): join also assigns this session its
-    next-free short name for the team (`<team>-a`, `<team>-b`, ... in order) and
-    prints it (`joined <team> as <team>-a`), so the session's name comes from the
-    join output. The allocation is ATOMIC through the KV bucket (create-if-absent
-    optimistic concurrency), so concurrent joiners never receive the same name. A
-    re-join is idempotent and returns the SAME assigned name. Attach extra
-    human aliases on top with `bus name <alias>`.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("leave") do
-    """
-    kazi bus leave [--json]
-
-    Clear this session's team membership (issue #1069). Presence itself
-    remains until its TTL lapses.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  defp bus_help_text("name") do
-    """
-    kazi bus name <alias> [--json]
-
-    Bind a durable, addressable name to this session's UUID (T55.5, ADR-0073;
-    durable bindings T65.2, #1430): carried on presence across every later bus
-    call, rendered by `bus who`, accepted by `bus tell <alias>`, and stored
-    in a TTL-less KV bucket so the binding SURVIVES a daemon restart (names no
-    longer drop back to raw UUIDs on a bounce).
-
-    ATTACHES an alias on top of any daemon-assigned name (T65.3, #1430): when the
-    session already has an assigned name from `bus join`, THAT stays canonical in
-    `bus who` and the alias is an additional resolvable name; both reach the
-    session via `bus tell`. A session that never joined takes the alias as its
-    presence label directly.
-
-    Identity is the UUID; the name is a unique label bound to it. A rename
-    updates the one presence row (never a second). Binding a name already held
-    by a DIFFERENT session is a hard error naming the holder -- names are never
-    silently stolen; re-binding your OWN name is idempotent.
-
-    RENAME with a grace window (T65.4, #1430): when this changes the session's
-    presence label, the OLD name lingers as a resolvable tombstone-alias for a
-    bounded window (default 10 minutes, `config :kazi, :bus_rename_grace_s`). An
-    in-flight `bus tell <old-name>` inside the window still lands on the session
-    and the sender's ack notes the rename with the current name; after the window
-    the old name errors, naming the current name as a hint. (Attaching an alias
-    to an assigned-name session does NOT change the label, so it tombstones
-    nothing -- the old name stays live.)
-
-    A nickname cannot be empty, contain whitespace, start with `@` (reserved
-    for teams), or equal a different live session's id.
-
-    Prefer setting the name at launch when you can: the resolution chain is
-    `--session-name` > `KAZI_SESSION_NAME` > a harness-provided session env
-    var > a stable fallback id, so `KAZI_SESSION_NAME=<role> <harness>`
-    names every kazi invocation in the session with no per-session setup.
-
-    Requires a running `kazi daemon` -- prints a one-line no-daemon error
-    (exit 1) otherwise.
-    """
-  end
-
-  # T55.2 (ADR-0071 decision 2): the harness hook entry point install-hooks
-  # registers. The --help text is the ONE place the events are documented on
-  # the CLI surface itself -- the command's own contract is silence.
-  defp bus_help_text("hook") do
-    """
-    kazi bus hook <event>
-
-    The harness hook entry point `kazi install-hooks` registers (ADR-0071,
-    T60.3). Events: `session-start` (Claude Code's SessionStart -- registers
-    presence, joins the project-scope team, and injects the current board),
-    `turn` (Claude Code's UserPromptSubmit -- injects the bounded digest of
-    traffic since the session's last turn, COMPLETELY SILENT when the bus is
-    quiet, and clears this session's attention fact every turn), and
-    `notification` (Claude Code's Notification, T60.3/issue #1156 -- posts a
-    `waiting-on-operator` fact on this session's attention topic when the
-    harness blocks on a human; NEVER injects anything, so it is exempt from
-    the binding rule below by construction -- see `bus board --attention` and
-    docs/session-bus.md).
-
-    Contract: ALWAYS exits 0 and never blocks a session. An opt-in gate
-    (ADR-0084, issue #1705) is checked FIRST, before any daemon contact is
-    even attempted: default OFF, armed by `KAZI_BUS_HOOKS=1` in the
-    environment or a marker file `kazi install-hooks` writes automatically
-    (`~/.config/kazi/bus-hooks-enabled`) -- so installing the Claude Code
-    plugin alone no longer makes these hooks do anything; see
-    docs/session-bus.md ("The opt-in gate"). With the gate armed but no
-    daemon running, or an unknown/missing <event>, it prints nothing and
-    returns immediately. A hard ~2s wall-clock bound applies even to a HUNG
-    daemon -- a slow or stalled daemon can never tax or break a turn.
-    Injected content is framed as UNTRUSTED, provenance-stamped, advisory
-    external input, never a command channel (ADR-0067 point 7).
-    """
-  end
-
-  defp bus_help_text("prune") do
-    """
-    kazi bus prune <topic> [--scope machine|project] [--json]
-    kazi bus prune --prefix <prefix> [--scope machine|project] [--json]
-
-    Erase every message on a fact topic's subject outright (issue #1687 root
-    cause 2) -- the retract verb the facts stream never had. Posting `"none"`
-    on a topic (an attention clear, e.g.) only appends a NEW last-value
-    message; the topic and its whole history stay in the stream until the
-    30-day `max_age` naturally rolls off. `bus prune` actually drops it: the
-    topic stops counting toward `bus board`'s `total_facts`, stops appearing
-    in `facts`, and a later `read`/`peek` never sees it either.
-
-    Exactly one of <topic> or --prefix is required. <topic> purges one exact
-    topic. --prefix purges every CURRENTLY LIVE topic (per the same
-    last-per-subject read `bus board` uses) whose name starts with the
-    prefix -- the one-shot bulk cleanup for an accumulated backlog (e.g.
-    `kazi bus prune --prefix attention-`), since a NATS subject wildcard
-    matches a whole token and cannot glob inside one.
-
-    Purging a topic with no messages, or a --prefix matching nothing, is a
-    no-op (exit 0), never an error. Under --json: `{ok, schema_version,
-    purged: [topic, ...]}`. Requires a running `kazi daemon` -- prints a
-    one-line no-daemon error (exit 1) otherwise.
-    """
-  end
-
-  # T39.3 (ADR-0049): `approve --write <path>` materializes the approved goal to a
-  # loadable goal-file. Scoped to `approve` — `reject` never writes a goal-file.
   defp approval_command(:approve, proposal_ref, [], flags),
     do: {:approve, proposal_ref, json: flags[:json] || false, write: flags[:write]}
 
@@ -2285,7 +1596,7 @@ defmodule Kazi.CLI do
   # `KAZI_LANE_CONTRACT`, since ADR-0086's lane adapter passes dispatch inputs
   # by contract file + env, not a CLI rewrite. Unlike single_node (a bare
   # boolean), this flag carries a VALUE (a path), so the flag wins over the
-  # env var when both are set -- the same precedence `--nats-token`/
+  # env var when both are set; explicit flags take precedence over
   # `KAZI_NATS_TOKEN` already uses (line ~1636).
   @spec lane_contract_path(keyword()) :: String.t() | nil
   defp lane_contract_path(flags) do
@@ -5553,7 +4864,7 @@ defmodule Kazi.CLI do
   # A future harness-agnostic addition can extend step 3 with more orchestrator
   # session env vars as they're confirmed to exist; this only adds the one this
   # codebase's own operator environment was confirmed to set.
-  @doc "Public so `Kazi.Bus` (T51.2) reuses the SAME session-identity resolution chain, instead of reinventing it."
+  @doc "Resolve the driving session label from flags or harness environment."
   @spec resolve_session_name(keyword()) :: String.t() | nil
   def resolve_session_name(opts) do
     opts[:session_name] ||
@@ -6693,126 +6004,6 @@ defmodule Kazi.CLI do
     IO.puts(:stderr, "warning: could not migrate LOCAL.md: #{format_skill_error(reason)}")
   end
 
-  # =============================================================================
-  # install-hooks command (T55.2, UC-068, ADR-0071): session-bus delivery
-  # =============================================================================
-  #
-  # `kazi install-hooks` registers the two delivery hooks (SessionStart +
-  # UserPromptSubmit -> `kazi bus hook <event>`) in the Claude Code settings,
-  # the opt-in sibling of `install-skill` (same consent contract: only this
-  # explicit command writes harness config). The merge/uninstall mechanics --
-  # merge-never-clobber, byte-identical preservation, exact-inverse uninstall,
-  # malformed-input-writes-nothing -- live in `Kazi.Teach.InstallHooks`.
-  #
-  # The target dir is INJECTABLE so tests never write to the real ~/.claude:
-  # `--dir <path>` wins, else `inject_opts[:hooks_dir]` (the same seam pattern
-  # as install-skill's :skill_dir), else the default `~/.claude`.
-  defp execute_install_hooks(opts, inject_opts) do
-    hooks_opts = install_hooks_opts(opts, inject_opts)
-
-    if opts[:uninstall] do
-      case InstallHooks.uninstall(hooks_opts) do
-        {:ok, %{status: :unchanged, path: path}} ->
-          IO.puts("UNCHANGED  #{path} (no kazi hooks installed)")
-          0
-
-        {:ok, %{status: :removed, deleted: true, path: path} = result} ->
-          IO.puts("REMOVED  #{path} (the file install-hooks created; deleted)")
-          report_gate_disarmed(result)
-          0
-
-        {:ok, %{status: :removed, path: path} = result} ->
-          IO.puts("REMOVED  kazi hooks from #{path} (everything else preserved)")
-          report_gate_disarmed(result)
-          0
-
-        {:error, message} ->
-          IO.puts(:stderr, "error: #{message}")
-          1
-      end
-    else
-      case InstallHooks.install(hooks_opts) do
-        {:ok, %{status: :unchanged, path: path} = result} ->
-          IO.puts("UNCHANGED  #{path} (kazi hooks already installed)")
-          report_gate_armed(result)
-          0
-
-        {:ok, %{status: :installed, path: path} = result} ->
-          IO.puts("WROTE  #{path}")
-          IO.puts("")
-          IO.puts("Session-bus delivery is installed (ADR-0071/T60.3): SessionStart,")
-          IO.puts("UserPromptSubmit, and Notification now run `kazi bus hook <event>` --")
-          IO.puts("a silent no-op unless a `kazi daemon` is up. Re-running is a no-op;")
-          IO.puts("`kazi install-hooks --uninstall` removes exactly what was added.")
-          report_gate_armed(result)
-          0
-
-        {:error, message} ->
-          IO.puts(:stderr, "error: #{message}")
-          1
-      end
-    end
-  end
-
-  # ADR-0084/issue #1705: `install/1` and `uninstall/1` also arm/disarm the
-  # opt-in gate `kazi bus hook <event>` checks; report that outcome alongside
-  # the settings-file outcome so an operator sees the hooks they just
-  # registered will actually run, not silently stay gated off.
-  defp report_gate_armed(%{gate: :armed}) do
-    IO.puts("ARMED  the KAZI_BUS_HOOKS opt-in gate (ADR-0084) -- these hooks will run.")
-  end
-
-  defp report_gate_armed(%{gate: {:error, reason}}) do
-    IO.puts(
-      :stderr,
-      "warning: hooks registered, but could not arm the opt-in gate: #{:file.format_error(reason)}"
-    )
-
-    IO.puts(
-      :stderr,
-      "  they will stay silent until you set KAZI_BUS_HOOKS=1 or re-run install-hooks."
-    )
-  end
-
-  defp report_gate_disarmed(%{gate: :disarmed}) do
-    IO.puts("DISARMED  the KAZI_BUS_HOOKS opt-in gate marker (ADR-0084).")
-  end
-
-  # Resolve the settings target dir, NON-DEFAULT only when given: `--dir`
-  # (operator / tests) wins, else an injected `:hooks_dir` (tests), else
-  # InstallHooks' own default (~/.claude). `--local` always carries through
-  # (it picks the settings.local.json file name and, with no dir, <cwd>/.claude).
-  defp install_hooks_opts(opts, inject_opts) do
-    project = [project: opts[:project] || false]
-
-    cond do
-      is_binary(opts[:dir]) -> [dir: opts[:dir]] ++ project
-      is_binary(inject_opts[:hooks_dir]) -> [dir: inject_opts[:hooks_dir]] ++ project
-      true -> project
-    end
-  end
-
-  # =============================================================================
-  # mcp command (T33.1, ADR-0044): start the MCP server over stdio
-  # =============================================================================
-  #
-  # `kazi mcp` starts the SAME `Kazi.MCP.Server` that `mix kazi.mcp` starts — the
-  # one server module both entry points share through `Kazi.MCP.Stdio`, so the
-  # installed binary and the development task cannot drift (ADR-0044 decision 4).
-  # No new tools are introduced here: this is a distribution/packaging surface, the
-  # missing leg ADR-0024 named but the installed CLI never grew.
-  #
-  # We bring up the read-model the same way every other command does
-  # (`ensure_read_model`: burrito-safe, degrades quietly under the escript) so the
-  # server's status/list-proposed tools read real persisted state — matching the
-  # Mix task's `app.start`. The serve loop then reads line-delimited JSON-RPC from
-  # stdin and BLOCKS until EOF; the process exit code is 0 on a clean EOF.
-  #
-  # `inject_opts` is forwarded to `Kazi.MCP.Stdio.serve/1`: a hermetic caller (the
-  # Tier-2 boundary test) passes `boot: false` (the app is already running) and
-  # `redirect_logging: false` (do not mutate the global logger) to drive the real
-  # dispatch over a captured stdio without touching the read-model bootstrap or
-  # the logger handlers.
   defp execute_mcp(inject_opts) do
     inject_opts
     |> Keyword.put_new(:boot, &ensure_read_model/0)
@@ -6924,10 +6115,6 @@ defmodule Kazi.CLI do
 
     daemon_opts =
       [sock_path: sock_path, pid_path: pid_path]
-      |> maybe_put(:nats_bin, opts[:nats_bin])
-      |> maybe_put(:port, opts[:nats_port])
-      |> maybe_put(:nats_host, opts[:nats_host])
-      |> maybe_put(:nats_token, opts[:nats_token])
 
     case Kazi.Daemon.start(daemon_opts) do
       {:ok, sup_pid} ->
@@ -6971,12 +6158,6 @@ defmodule Kazi.CLI do
           inject_opts
         )
 
-      {:error, :nats_bin_not_found} ->
-        daemon_error(
-          "nats-server binary not found (searched PATH; pass --nats-bin <path>) -- install it from https://nats.io/download/",
-          opts
-        )
-
       {:error, reason} ->
         case socket_path_too_long(reason) do
           # #1724: the listener measured the socket path against the platform
@@ -7007,7 +6188,6 @@ defmodule Kazi.CLI do
 
           IO.puts("  velocity collector: #{velocity_status_line(resp["velocity"])}")
           IO.puts("  delivery projection: #{delivery_projection_line(resp["velocity"])}")
-          IO.puts("  nats: #{nats_health_line(resp["nats_health"])}")
         end)
 
         0
@@ -7052,7 +6232,7 @@ defmodule Kazi.CLI do
   # unlike `start`, which stands one up unconditionally): "restart" of nothing is
   # a mistake worth naming, not a silent fresh start. On a live daemon it shuts
   # the old one down, waits for the socket to free, then runs the SAME foreground
-  # `start` (fresh pid, socket re-bound) -- so any `--nats-*` flags on the restart
+  # `start` (fresh pid, socket re-bound)
   # carry through exactly as they would on `start`.
   defp execute_daemon("restart", [], opts, inject_opts) do
     sock_path = Kazi.Daemon.Supervisor.default_sock_path()
@@ -7130,21 +6310,7 @@ defmodule Kazi.CLI do
 
   defp socket_path_too_long(_other), do: nil
 
-  # #1719: `launchctl kickstart -k`, `systemctl restart` and a plain `kill` all
-  # deliver SIGTERM, whose DEFAULT BEAM disposition halts the VM without running
-  # any `terminate/2`. The daemon tree is started from this CLI process rather
-  # than from `Kazi.Application`, so nothing else stops it either -- the
-  # supervised nats-server was left orphaned holding its TCP port and the next
-  # daemon could never bind. Trapping SIGTERM routes signal-driven shutdown
-  # through the SAME `Supervisor.stop` the control-socket `shutdown` op takes,
-  # so every child gets its `terminate/2` before the VM halts.
-  #
-  # `System.trap_signal/2` is `:os.set_signal(:sigterm, :handle)` plus a
-  # `:gen_event` handler on `:erl_signal_server`; the handler owns the halt now
-  # that it has intercepted the default disposition. Best-effort, exactly as
-  # `Kazi.Runtime.Finalizer` treats its own traps: a runtime that refuses the
-  # trap still has `Kazi.Daemon.Nats`'s port-pipe shim as the backstop, which
-  # covers SIGKILL too.
+  # Gracefully stop read-model children before signal-driven VM shutdown.
   defp trap_daemon_sigterm(sup_pid) do
     case System.trap_signal(:sigterm, fn -> daemon_signal_shutdown(sup_pid) end) do
       {:ok, id} -> id
@@ -7196,7 +6362,7 @@ defmodule Kazi.CLI do
         else
           daemon_error(
             "no LaunchAgent plist installed at #{plist_path} -- nothing to re-register " <>
-              "(install it first; see docs/session-bus.md)",
+              "(install it first; see docs/daemon.md)",
             opts
           )
         end
@@ -7333,29 +6499,6 @@ defmodule Kazi.CLI do
 
   defp delivery_projection_line(_absent), do: "unknown"
 
-  # T69.5 (#1684): the `kazi daemon status` line for the nats-server
-  # restart-loop / bind-conflict watchdog (`Kazi.Daemon.Nats.health/1`, surfaced
-  # via `Kazi.Daemon.Control`'s `nats_health` ping field). A daemon predating
-  # this field omits it entirely -- falls back to "unknown", never fabricated.
-  defp nats_health_line(%{"restart_loop" => true} = h) do
-    "RESTART LOOP -- #{h["exits_in_window"]} exit(s) in #{div(h["exit_window_ms"] || 0, 1000)}s" <>
-      bind_conflict_suffix(h["bind_conflict"])
-  end
-
-  defp nats_health_line(%{"restart_loop" => false} = h) do
-    "ok" <> bind_conflict_suffix(h["bind_conflict"])
-  end
-
-  defp nats_health_line(_absent), do: "unknown"
-
-  defp bind_conflict_suffix(nil), do: ""
-
-  defp bind_conflict_suffix(%{"disposition" => d, "holder_pid" => pid}) do
-    " (last bind conflict: #{d}, pid #{pid})"
-  end
-
-  # Shared `status` probe: `:missing` / `:dead` render the point-4 down/stale
-  # messages; `:alive` pings and surfaces the raw handshake.
   defp daemon_probe_result(sock_path) do
     case Kazi.Daemon.Probe.probe(sock_path) do
       :missing ->
@@ -7411,815 +6554,6 @@ defmodule Kazi.CLI do
     env = Keyword.get(inject_opts, :supervisor_env)
     if Kazi.Daemon.LaunchAgent.supervised?(env), do: 0, else: 1
   end
-
-  # =============================================================================
-  # bus command (T51.2, ADR-0067 decision point 4): the session bus verbs over
-  # the daemon-supervised NATS bus. Every verb is a thin `Kazi.Bus` wrapper;
-  # the shared no-daemon message and `--json` envelope live here.
-  # =============================================================================
-  # #1060: `bus post <text>` (one positional) DEFAULTS <kind> to `fact` -- the
-  # issue's preferred fix over a required positional with no default.
-  defp execute_bus("post", [text], opts), do: do_bus_post(@default_bus_kind, text, opts)
-
-  defp execute_bus("post", [kind, text], opts) when kind in @bus_kinds,
-    do: do_bus_post(kind, text, opts)
-
-  # An EXPLICIT unknown kind is a one-line usage error enumerating the valid
-  # kinds (#1060) -- distinct from the generic bus-error path since this is a
-  # client-side usage mistake, never a daemon/transport error.
-  defp execute_bus("post", [kind, _text], opts) when kind not in @bus_kinds,
-    do: bus_error(unknown_bus_kind_error(kind), opts)
-
-  defp execute_bus("post", _args, opts),
-    do: bus_error("`bus post` requires <text> or <kind> <text>", opts)
-
-  # T55.12: a tell answers with the message's public id -- `told <recipient>`
-  # alone meant QUEUED, and left the sender no way to ask what became of it.
-  # A recipient the roster calls dead (or that has no presence row at all)
-  # WARNS on stderr and still sends: the send is real either way, and the
-  # operator may know better than the last sweep did.
-  defp execute_bus("tell", [session, text], opts) do
-    case Kazi.Bus.tell(session, text, bus_call_opts(opts)) do
-      {:ok, receipt} ->
-        emit(
-          json?(opts),
-          %{
-            "ok" => true,
-            "schema_version" => @run_schema_version,
-            "id" => receipt.id,
-            "recipient" => receipt.recipient,
-            "liveness" => receipt.liveness
-          }
-          # T65.4 (#1430): carry the renamed-notice only when the tell landed via
-          # a tombstone-alias, so the JSON stays byte-identical for the common case.
-          |> maybe_put_json("notice", Map.get(receipt, :notice)),
-          fn ->
-            warn_on_liveness(receipt)
-            IO.puts("told #{receipt.recipient} (id #{receipt.id})")
-            # T65.4 (#1430): the recipient was renamed and the sender used the
-            # OLD name inside the grace window -- name the current name.
-            if notice = Map.get(receipt, :notice), do: IO.puts(notice)
-          end
-        )
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp execute_bus("tell", _args, opts),
-    do: bus_error("`bus tell` requires <session> <text>", opts)
-
-  # T55.12: `bus status <id>` -- what became of a tell, from the recipient's
-  # own ack state.
-  defp execute_bus("status", [id], opts) do
-    case Integer.parse(id) do
-      {seq, ""} when seq > 0 ->
-        do_bus_status(seq, opts)
-
-      _other ->
-        bus_error("`bus status` requires a message id (a positive integer)", opts)
-    end
-  end
-
-  defp execute_bus("status", _args, opts),
-    do: bus_error("`bus status` requires <id>", opts)
-
-  # T55.6 (ADR-0072 decision 3): `bus get <id>` -- the deliberate pull for a
-  # stubbed body. A direct stream GET by id that consumes nothing.
-  defp execute_bus("get", [id], opts) do
-    case Integer.parse(id) do
-      {seq, ""} when seq > 0 ->
-        do_bus_get(seq, opts)
-
-      _other ->
-        bus_error("`bus get` requires a message id (a positive integer)", opts)
-    end
-  end
-
-  defp execute_bus("get", _args, opts),
-    do: bus_error("`bus get` requires <id>", opts)
-
-  # #1059: `bus read --peek` is non-destructive -- delegates to `Kazi.Bus.peek/1`
-  # exactly like `bus peek` (kept as two entry points, one shared implementation).
-  defp execute_bus("read", [], opts) do
-    if opts[:peek] do
-      do_bus_peek(opts)
-    else
-      case parse_read_since(opts[:since]) do
-        {:error, message} -> bus_error(message, opts)
-        {:ok, since} -> do_bus_assembled_read(opts, since: since)
-      end
-    end
-  end
-
-  defp execute_bus("read", extra, opts),
-    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
-
-  defp execute_bus("peek", [], opts), do: do_bus_peek(opts)
-
-  defp execute_bus("peek", extra, opts),
-    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
-
-  defp execute_bus("who", [], opts) do
-    # T55.11: --project/--machine filter server-side over the fetched roster;
-    # --json carries `ttl_s` (and per-session `seen_s`) so the freshness
-    # cutoff is data, not folklore.
-    who_opts =
-      bus_call_opts(opts) ++
-        [
-          who_team: opts[:team],
-          all: opts[:all],
-          who_project: opts[:project],
-          who_machine: opts[:machine]
-        ]
-
-    case Kazi.Bus.who(who_opts) do
-      {:ok, sessions} ->
-        emit(
-          json?(opts),
-          %{"ok" => true, "ttl_s" => Kazi.Bus.session_ttl_s(), "sessions" => sessions},
-          fn ->
-            Enum.each(sessions, fn s ->
-              # T55.5: a named session renders name-first -- the addressable
-              # label a `bus tell` accepts -- with the raw id in parentheses.
-              label =
-                if s["name"], do: "#{s["name"]} (#{s["session"]})", else: s["session"]
-
-              machine = if s["machine"], do: " machine=#{s["machine"]}", else: ""
-              liveness = if s["liveness"], do: " liveness=#{s["liveness"]}", else: ""
-              team = if s["team"], do: " team=#{s["team"]}", else: ""
-              age = if s["age_s"], do: " seen=#{s["age_s"]}s ago", else: ""
-              # T55.12: only render a depth that says something -- an empty
-              # inbox is the norm and would be noise on every row.
-              inbox = if s["inbox"] && s["inbox"] > 0, do: " inbox=#{s["inbox"]}", else: ""
-
-              IO.puts(
-                "#{label}#{machine} pid=#{s["pid"]}#{liveness}#{team}#{inbox}#{age} #{s["cwd"]}"
-              )
-            end)
-          end
-        )
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  # T55.4 (ADR-0073): the current-state projection. Cursor-free -- consumes
-  # nothing, so a session may board every turn without draining what a read was
-  # counting on.
-  defp execute_bus("board", [], opts) do
-    case Kazi.Bus.board(bus_call_opts(opts) ++ [claims: true]) do
-      {:ok, board} ->
-        emit(json?(opts), bus_board_payload(board), fn -> print_board(board, opts) end)
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp execute_bus("board", extra, opts),
-    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
-
-  # Issue #1687 root cause 2: the retract/prune verb the facts stream never
-  # had -- a "none" clear posts a NEW message and leaves the topic (and its
-  # whole history) in the stream until the 30-day `max_age` rolls off, so a
-  # busy topic namespace (one attention-<session> topic per ephemeral
-  # session, e.g.) only grows. `bus prune <topic>` erases one topic outright;
-  # `bus prune --prefix <prefix>` is the bulk one-shot cleanup for an
-  # accumulated backlog (e.g. `--prefix attention-`).
-  defp execute_bus("prune", [topic], opts) do
-    do_bus_prune(topic, opts)
-  end
-
-  defp execute_bus("prune", [], opts) do
-    case opts[:prefix] do
-      prefix when is_binary(prefix) and prefix != "" -> do_bus_prune(nil, opts)
-      _absent_or_blank -> bus_error("`bus prune` requires <topic> or --prefix <prefix>", opts)
-    end
-  end
-
-  defp execute_bus("prune", extra, opts),
-    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
-
-  # #1091: block until a NEW message arrives, then consume and print it.
-  # T54.9/#1097: --since <seq|now|all> anchors what counts as new (default
-  # `now` -- pending backlog never satisfies the watch).
-  # #1720: --directed narrows WHOSE message counts -- only messages addressed
-  # to this session or its team, never broadcast scope traffic.
-  defp execute_bus("watch", [], opts) do
-    case parse_watch_since(opts[:since]) do
-      {:error, message} ->
-        bus_error(message, opts)
-
-      {:ok, since} ->
-        watch_opts = bus_call_opts(opts) ++ [since: since, directed: opts[:directed] == true]
-
-        case Kazi.Bus.watch(watch_opts) do
-          {:ok, messages} ->
-            reply = local_bus_reply(messages, opts)
-            emit(json?(opts), bus_read_payload(reply), fn -> print_read_digest(reply) end)
-
-            0
-
-          {:error, :watch_timeout} ->
-            emit(json?(opts), %{"ok" => false, "timeout" => true}, fn ->
-              IO.puts(:stderr, "bus watch timed out with no messages")
-            end)
-
-            3
-
-          {:error, reason} ->
-            bus_error(reason, opts)
-        end
-    end
-  end
-
-  defp execute_bus("watch", extra, opts),
-    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
-
-  # T65.1 (#1430): argless `bus join` DERIVES the team from the workspace's git
-  # origin -- no team string typed, so the leading-dash class cannot recur.
-  defp execute_bus("join", [], opts) do
-    case Kazi.Bus.join_derived(bus_call_opts(opts)) do
-      {:ok, %{slug: slug, source: source, notice: notice}} ->
-        assign_and_report_name(slug, source, notice, true, opts)
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  # #1069: named-team membership. An explicit team argument is the deliberate
-  # cross-repo override (T65.1) -- recorded `derived=false`. `bus join -- <team>`
-  # reaches here with the team as a positional even when it begins with `-`.
-  defp execute_bus("join", [team], opts) do
-    case Kazi.Bus.join(team, Keyword.put(bus_call_opts(opts), :derived, false)) do
-      :ok ->
-        assign_and_report_name(team, nil, nil, false, opts)
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp execute_bus("join", _args, opts),
-    do: bus_error("`bus join` takes at most one <team> argument", opts)
-
-  defp execute_bus("leave", [], opts) do
-    case Kazi.Bus.leave(bus_call_opts(opts)) do
-      :ok ->
-        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("left team") end)
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp execute_bus("leave", extra, opts),
-    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
-
-  # T55.5 (ADR-0073 decision point 3): assign a durable, addressable name.
-  defp execute_bus("name", [nickname], opts) do
-    case Kazi.Bus.name(nickname, bus_call_opts(opts)) do
-      :ok ->
-        emit(json?(opts), %{"ok" => true, "name" => nickname}, fn ->
-          IO.puts("named #{nickname}")
-        end)
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp execute_bus("name", _args, opts),
-    do: bus_error("`bus name` requires exactly one <nickname> argument", opts)
-
-  # T55.2/T55.9 (ADR-0071 decisions 2/4/5): `bus hook <event>` -- the harness
-  # hook entry point `install-hooks` registers (SessionStart -> `session-start`,
-  # UserPromptSubmit -> `turn`). The payload lives in `Kazi.Bus.Hook`, which
-  # holds the whole hook contract: ALWAYS exit 0, a silent no-op with the daemon
-  # down, a hard ~2s wall-clock bound even against a HUNG daemon, and the
-  # untrusted-advisory framing on anything it injects -- because a hook that
-  # errors, blocks, or chatters breaks/taxes every turn of every session. An
-  # unknown or missing <event> is ALSO a silent success; `kazi bus hook --help`
-  # documents the events.
-  defp execute_bus("hook", [event], opts), do: Kazi.Bus.Hook.run(event, bus_call_opts(opts))
-  defp execute_bus("hook", _args, _opts), do: 0
-
-  defp execute_bus("who", extra, opts),
-    do: bus_error("unexpected argument(s): #{Enum.join(extra, " ")}", opts)
-
-  # T65.3 (#1430): after a join lands the presence row, the daemon assigns the
-  # session its next-free short name for the team (atomic KV allocation) and the
-  # join OUTPUT reports it -- so the operator learns the session's name straight
-  # from `bus join`. Assignment is idempotent, so a re-join prints the SAME name.
-  defp assign_and_report_name(team, source, notice, derived?, opts) do
-    case Kazi.Bus.assign_name(team, bus_call_opts(opts)) do
-      {:ok, name} ->
-        payload =
-          %{"ok" => true, "team" => team, "derived" => derived?, "name" => name}
-          |> maybe_put_json("source", source && to_string(source))
-
-        emit(json?(opts), payload, fn ->
-          IO.puts("joined #{team}#{if derived?, do: " (derived)", else: ""} as #{name}")
-          if notice, do: IO.puts(notice)
-        end)
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp maybe_put_json(map, _key, nil), do: map
-  defp maybe_put_json(map, key, value), do: Map.put(map, key, value)
-
-  # T55.12: the two liveness verdicts worth interrupting a send for. Both still
-  # queue, so the wording says what happened AND what to check -- never
-  # "failed", which would be a different lie from the one this task removes.
-  defp warn_on_liveness(%{liveness: "dead-reaping", recipient: recipient}) do
-    IO.puts(
-      :stderr,
-      "warning: #{recipient} looks dead (liveness=dead-reaping) -- queued anyway; " <>
-        "check `kazi bus who --all` and `kazi bus status <id>`"
-    )
-  end
-
-  defp warn_on_liveness(%{liveness: "no-presence", recipient: recipient}) do
-    IO.puts(
-      :stderr,
-      "warning: #{recipient} has no presence row -- queued to its durable inbox; " <>
-        "check `kazi bus who --all` and `kazi bus status <id>`"
-    )
-  end
-
-  defp warn_on_liveness(_receipt), do: :ok
-
-  defp do_bus_status(seq, opts) do
-    case Kazi.Bus.status(seq, bus_call_opts(opts)) do
-      {:ok, status} ->
-        emit(
-          json?(opts),
-          Map.merge(status, %{"ok" => true, "schema_version" => @run_schema_version}),
-          fn -> print_bus_status(status) end
-        )
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp print_bus_status(status) do
-    sent = if status["sent_at"], do: " sent=#{status["sent_at"]}", else: ""
-    IO.puts("#{status["id"]} #{status["state"]} recipient=#{status["recipient"]}#{sent}")
-
-    # The per-recipient breakdown is the whole point for a team fan-out; for a
-    # single recipient the line above already said it, so don't repeat it.
-    case status["recipients"] do
-      [_single] ->
-        :ok
-
-      recipients ->
-        Enum.each(recipients, fn r -> IO.puts("  #{r["session"]} #{r["state"]}") end)
-    end
-  end
-
-  # T55.6: fetch and render one message by id. `Kazi.Bus.get/2` always returns
-  # the FULL body; `Kazi.Bus.Digest.get_view/2` bounds it to a cheap preview
-  # unless `--full` was passed -- the same 1024-byte threshold that stubbed it.
-  defp do_bus_get(seq, opts) do
-    case Kazi.Bus.get(seq, bus_call_opts(opts)) do
-      {:ok, message} ->
-        view = Kazi.Bus.Digest.get_view(message, opts[:full] || false)
-
-        emit(
-          json?(opts),
-          %{"ok" => true, "schema_version" => @run_schema_version, "message" => view},
-          fn -> print_bus_get(view) end
-        )
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp print_bus_get(view) do
-    topic = view["topic"] || "_"
-    session = if view["session"], do: " session=#{view["session"]}", else: ""
-    machine = if view["machine"], do: " machine=#{view["machine"]}", else: ""
-    IO.puts("#{view["id"]} #{view["kind"]}/#{topic} #{view["bytes"]}B#{session}#{machine}")
-    IO.puts(view["text"])
-
-    if view["truncated"] do
-      IO.puts(
-        "-- preview truncated to #{byte_size(view["text"])}B of #{view["bytes"]}B; pass --full for the whole body"
-      )
-    end
-  end
-
-  defp do_bus_post(kind, text, opts) do
-    case Kazi.Bus.post(kind, text, bus_call_opts(opts)) do
-      :ok ->
-        emit(json?(opts), %{"ok" => true}, fn -> IO.puts("posted") end)
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp do_bus_peek(opts), do: do_bus_assembled_read(opts, peek: true)
-
-  # Issue #1687: `bus prune <topic>` / `bus prune --prefix <prefix>` -- the
-  # retract call, then the same emit(json?/human) split every other bus verb
-  # uses.
-  defp do_bus_prune(topic, opts) do
-    prune_opts =
-      if topic, do: bus_call_opts(opts), else: bus_call_opts(opts) ++ [prefix: opts[:prefix]]
-
-    case Kazi.Bus.retract(topic, prune_opts) do
-      {:ok, purged} ->
-        emit(
-          json?(opts),
-          %{"ok" => true, "schema_version" => @run_schema_version, "purged" => purged},
-          fn ->
-            if purged == [] do
-              IO.puts("pruned: (nothing matched)")
-            else
-              IO.puts("pruned #{length(purged)} topic(s):")
-              Enum.each(purged, &IO.puts("  " <> &1))
-            end
-          end
-        )
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  # T55.7 (ADR-0072 d5): the ONE read path. The daemon pulls the consumer,
-  # aggregates, and enforces the bound; the CLI renders what came back and
-  # never re-aggregates. `Kazi.Bus.read_digest/1` is the same call the MCP
-  # tools and the ADR-0071 hook make, which is what keeps the three surfaces
-  # from drifting apart.
-  defp do_bus_assembled_read(opts, mode_opts) do
-    call_opts = bus_call_opts(opts) ++ mode_opts ++ [full: opts[:full]]
-
-    case Kazi.Bus.read_digest(call_opts) do
-      {:ok, reply} ->
-        emit(json?(opts), bus_read_payload(reply), fn -> print_read_digest(reply) end)
-
-        0
-
-      {:error, reason} ->
-        bus_error(reason, opts)
-    end
-  end
-
-  defp bus_call_opts(opts) do
-    [
-      scope: opts[:scope],
-      topic: opts[:topic],
-      sev: opts[:sev],
-      timeout: opts[:timeout],
-      session_name: opts[:session_name]
-    ]
-  end
-
-  # T54.9/#1097: `bus watch --since <seq|now|all>` -> Kazi.Bus.watch/1's
-  # :since option. An unrecognized value is a fail-fast usage error, never a
-  # silent fallback to the default anchor.
-  defp parse_watch_since(nil), do: {:ok, :now}
-  defp parse_watch_since("now"), do: {:ok, :now}
-  defp parse_watch_since("all"), do: {:ok, :all}
-
-  defp parse_watch_since(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {seq, ""} when seq >= 0 ->
-        {:ok, seq}
-
-      _other ->
-        {:error,
-         "invalid --since #{inspect(value)} (expected `now`, `all`, or a numeric stream sequence)"}
-    end
-  end
-
-  # T55.7: `bus read --since <cursor>` (T51.4's debugging escape) replays from
-  # a stream sequence. Unlike `watch --since`, `now`/`all` are not accepted:
-  # a read is not a park, so "wake me on new" has no meaning here and a plain
-  # `bus read` already is `--since all`. A bad value is a fail-fast usage
-  # error, never a silent full read.
-  defp parse_read_since(nil), do: {:ok, nil}
-
-  defp parse_read_since(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {seq, ""} when seq >= 0 ->
-        {:ok, seq}
-
-      _other ->
-        {:error,
-         "invalid --since #{inspect(value)} (expected a numeric stream sequence, e.g. `--since 42`)"}
-    end
-  end
-
-  # T55.4 (ADR-0073 d1): the `bus board` --json envelope -- the current-state
-  # projection under the ADR-0023 versioned contract, mirroring
-  # `bus_read_payload/1`'s shape (`kazi schema bus`).
-  defp bus_board_payload(board) do
-    %{"ok" => true, "schema_version" => @run_schema_version, "board" => board}
-  end
-
-  # The human board: NEEDS OPERATOR first (T60.3 -- the scarcest-attention
-  # section is the whole point, so it goes before facts/roster/claims), then
-  # facts (topic = current value, or a stub/overflow notice), then the roster
-  # (addressable identity + liveness). Empty sections say so rather than
-  # rendering a blank block. `--attention` trims the render to ONLY the
-  # NEEDS OPERATOR section (the full board is still what --json returns).
-  defp print_board(board, opts) do
-    print_board_attention(board)
-
-    unless opts[:attention] do
-      IO.puts("facts (#{board["total_facts"]} topics):")
-
-      if board["facts"] == [] do
-        IO.puts("  (none)")
-      else
-        Enum.each(board["facts"], &IO.puts("  " <> board_fact_line(&1)))
-      end
-
-      IO.puts("roster (#{board["total_sessions"]} sessions):")
-
-      if board["roster"] == [] do
-        IO.puts("  (none)")
-      else
-        Enum.each(board["roster"], &IO.puts("  " <> board_roster_line(&1)))
-      end
-
-      print_board_claims(board)
-    end
-  end
-
-  # T60.3 (issue #1156): one glance answers "who is blocked on me, where, for
-  # how long" across the whole fleet -- every session with a live
-  # `waiting-on-operator` fact, oldest-waiting first.
-  defp print_board_attention(board) do
-    IO.puts("NEEDS OPERATOR (#{board["total_attention"] || 0}):")
-
-    case board["attention"] || [] do
-      [] ->
-        IO.puts("  (none)")
-
-      entries ->
-        Enum.each(entries, &IO.puts("  " <> board_attention_line(&1)))
-    end
-  end
-
-  defp board_attention_line(entry) do
-    machine = if entry["machine"], do: "@#{entry["machine"]}", else: ""
-    age = if entry["age_s"], do: " (waiting #{board_age(entry["age_s"])})", else: ""
-    "#{entry["session"]}#{machine}  #{entry["summary"]}#{age}"
-  end
-
-  # ADR-0073 point 2: ownership read live from `refs/claims/*`. When the remote
-  # is unreachable the section is ONE honest line -- never a possibly-stale
-  # table. `claims_available`/`claims` are absent only when the caller did not
-  # ask for claims (not on the `bus board` path), so the section is skipped.
-  defp print_board_claims(%{"claims_available" => false}),
-    do: IO.puts("claims: unavailable (remote unreachable)")
-
-  defp print_board_claims(%{"claims_available" => true} = board) do
-    IO.puts("claims (#{board["total_claims"]} held):")
-
-    if board["claims"] == [] do
-      IO.puts("  (none)")
-    else
-      Enum.each(board["claims"], &IO.puts("  " <> board_claim_line(&1)))
-    end
-  end
-
-  defp print_board_claims(_board), do: :ok
-
-  defp board_claim_line(claim) do
-    owner = claim["owner"] || "unknown"
-    host = if claim["host"], do: "@#{claim["host"]}", else: ""
-    age = if claim["age_s"], do: " (#{board_age(claim["age_s"])})", else: ""
-    "#{claim["task"]}: #{owner}#{host}#{age}"
-  end
-
-  # Compact age for the claims section -- the one board field that is live by
-  # design (ADR-0073 point 2), so it ticks and the section is not idempotent,
-  # unlike the pure fact/roster projection.
-  defp board_age(s) when s < 60, do: "#{s}s"
-  defp board_age(s) when s < 3600, do: "#{div(s, 60)}m"
-  defp board_age(s) when s < 86_400, do: "#{div(s, 3600)}h"
-  defp board_age(s), do: "#{div(s, 86_400)}d"
-
-  defp board_fact_line(%{"type" => "overflow", "count" => count}),
-    do: "... #{count} more topics"
-
-  defp board_fact_line(%{"type" => "stub"} = line),
-    do: "#{line["topic"] || "_"}: <#{line["bytes"]} bytes, id #{line["id"]}>"
-
-  defp board_fact_line(line),
-    do: "#{line["topic"] || "_"}: #{line["text"]}"
-
-  defp board_roster_line(row) do
-    label = if row["name"], do: "#{row["name"]} (#{row["session"]})", else: row["session"]
-    team = if row["team"], do: " team=#{row["team"]}", else: ""
-    machine = if row["machine"], do: " machine=#{row["machine"]}", else: ""
-    liveness = if row["liveness"], do: " liveness=#{row["liveness"]}", else: ""
-    "#{label}#{machine}#{liveness}#{team}"
-  end
-
-  # T55.7: renders the daemon's already-assembled digest. The `--full` escape
-  # has no digest to render, so its TTY view is summarized locally -- the one
-  # place the bound does not apply, because asking for `--full` IS asking for
-  # the unabridged set.
-  defp print_read_digest(%{"digest" => digest}) do
-    digest |> Kazi.Bus.Digest.to_tty_lines() |> Enum.each(&IO.puts/1)
-  end
-
-  defp print_read_digest(%{"messages" => messages}) do
-    print_read_digest(%{"digest" => Kazi.Bus.Digest.render(messages)})
-  end
-
-  defp print_read_digest(_reply), do: :ok
-
-  @doc false
-  # T55.1 (ADR-0072 d1/d6): the machine-readable result for `bus read|peek|
-  # watch --json`. The bounded DIGEST is the default; `--full` is the
-  # documented escape returning every pending message unabridged. Both shapes
-  # join the ADR-0023 versioned contract (`kazi schema bus`).
-  #
-  # T55.7: `reply` is what the DAEMON assembled (`Kazi.Bus.read_digest/1`) --
-  # this only stamps the envelope onto it. `--full` vs digest is now decided
-  # by the daemon, which is why this no longer takes opts. Public so tests pin
-  # the envelope.
-  @spec bus_read_payload(map()) :: map()
-  def bus_read_payload(reply) do
-    %{"ok" => true, "schema_version" => @run_schema_version}
-    |> Map.merge(Map.take(reply, ["digest", "messages"]))
-  end
-
-  @doc false
-  # T55.1/T54.9: `bus watch`'s local render. A watch is a PARK, not a read --
-  # the messages that woke it are already in hand, and E55 must not touch
-  # `watch/1` (T54.9 owns it) -- so it shapes the same reply the daemon would
-  # have returned and shares every renderer below it.
-  @spec local_bus_reply([map()], keyword()) :: map()
-  def local_bus_reply(messages, opts) do
-    if opts[:full] do
-      %{"messages" => messages}
-    else
-      %{"digest" => Kazi.Bus.Digest.render(messages)}
-    end
-  end
-
-  defp bus_error(:no_daemon, opts),
-    do: daemon_error("no daemon running -- start one with `kazi daemon start`", opts)
-
-  # #1579: the socket FILE is present but the daemon is not accepting connections
-  # -- a crashed daemon whose socket survives, or (the observed case) a daemon
-  # alive-but-deaf after exhausting its file descriptors under fleet churn
-  # (`accept failed: :emfile`). DISTINCT from `:no_daemon` -- the process may well
-  # be alive, so "start one" is the wrong fix and misleads the operator. Name the
-  # state and the force-restart remedy (`KeepAlive` cannot recover a deaf-but-
-  # running process).
-  defp bus_error(:daemon_socket_unresponsive, opts),
-    do:
-      daemon_error(
-        "daemon socket exists but is not accepting connections (the process may be " <>
-          "alive but wedged, or out of file descriptors) -- force-restart it with " <>
-          "`#{Kazi.Daemon.LaunchAgent.kickstart_command()}` (macOS launchd) or " <>
-          "`kazi daemon restart`",
-        opts
-      )
-
-  # This fix: a `with_conn`-routed call (who/board/tell/...) hit its hard
-  # deadline (`Kazi.Bus.run/3`) instead of hanging -- distinct from
-  # `:no_daemon` because a daemon IS there, it (or the NATS round-trip) is
-  # just wedged or slow past the bound.
-  defp bus_error(:bus_unavailable, opts),
-    do:
-      daemon_error(
-        "bus call timed out -- the daemon or its NATS connection may be wedged; " <>
-          "try `kazi daemon status` (a stuck daemon may need a restart)",
-        opts
-      )
-
-  # T55.7: the daemon answered, and refused. Distinct from `:no_daemon` --
-  # "the bus is unreachable from the daemon" is a different fault from "there
-  # is no daemon", and an operator who cannot tell them apart debugs the wrong
-  # one.
-  defp bus_error({:bus_read_failed, reason}, opts),
-    do: daemon_error("daemon could not read the bus: #{reason}", opts)
-
-  # T58.2 (#1227): the daemon's `bus_vsn` is older than this CLI requires (or
-  # missing entirely -- a pre-T58.2 daemon). Caught before any op is attempted,
-  # for both reads and writes, instead of writes silently succeeding while
-  # reads fail with an unexplained `unknown_op`.
-  defp bus_error({:daemon_protocol_skew, daemon_vsn}, opts),
-    do:
-      daemon_error(
-        "daemon is running an older version (#{daemon_vsn}) that does not speak this " <>
-          "CLI's bus protocol -- restart it: `kazi daemon stop && kazi daemon start`",
-        opts
-      )
-
-  defp bus_error({:text_too_large, cap}, opts),
-    do: daemon_error("message exceeds the #{cap}-byte bus cap", opts)
-
-  # T55.5: an unaddressable recipient is a ONE-LINE error naming the live
-  # roster -- never a silent queue-to-nowhere.
-  defp bus_error({:unknown_recipient, recipient, roster}, opts) do
-    live =
-      case roster do
-        [] -> "no live sessions on the bus"
-        labels -> "live sessions: #{Enum.join(labels, ", ")}"
-      end
-
-    daemon_error("unknown recipient #{inspect(recipient)} -- #{live}", opts)
-  end
-
-  defp bus_error({:invalid_nickname, nickname, why}, opts),
-    do: daemon_error("invalid nickname #{inspect(nickname)} -- #{why}", opts)
-
-  # T65.2 (#1430): a name is a unique label bound to one session UUID. Binding
-  # one already held by another session names the holder rather than stealing it.
-  defp bus_error({:name_taken, nickname, holder}, opts),
-    do:
-      daemon_error(
-        "name #{inspect(nickname)} is already bound to session #{holder} -- pick another name",
-        opts
-      )
-
-  # T65.3 (#1430): all 26 assigned-name letters for the team are taken.
-  defp bus_error({:name_pool_exhausted, team}, opts),
-    do:
-      daemon_error(
-        "no free assigned name for team #{inspect(team)} -- all of #{team}-a..z are in use; " <>
-          "attach an explicit alias with `kazi bus name <alias>`",
-        opts
-      )
-
-  # T65.4 (#1430): a `tell` to a renamed name whose tombstone-alias grace window
-  # has expired -- name the session's CURRENT name so the sender can re-address.
-  defp bus_error({:name_tombstoned, old, current}, opts),
-    do:
-      daemon_error(
-        "name #{inspect(old)} was renamed to #{inspect(current)} and its grace window " <>
-          "has expired -- address #{inspect(current)} instead",
-        opts
-      )
-
-  # T55.12: `bus status` on an id the stream cannot produce. Both causes are
-  # named because they call for opposite reactions -- a typo is the sender's to
-  # fix, an aged-out id means the answer is simply gone.
-  defp bus_error({:unknown_message, id}, opts),
-    do:
-      daemon_error(
-        "no message with id #{id} -- it was never posted, or it aged out of the 30-day retention",
-        opts
-      )
-
-  defp bus_error({:not_directed, id, kind}, opts),
-    do:
-      daemon_error(
-        "message #{id} is a broadcast (kind #{kind}), not a directed tell -- " <>
-          "delivery status needs one recipient whose ack state can answer for it",
-        opts
-      )
-
-  # T55.12: a tell whose publish the stream never acked. The old fire-and-forget
-  # publish could not see this at all -- it reported success regardless.
-  defp bus_error({:publish_rejected, detail}, opts),
-    do: daemon_error("the bus stream rejected the message: #{inspect(detail)}", opts)
-
-  defp bus_error({:publish_failed, reason}, opts),
-    do:
-      daemon_error(
-        "the message was not acknowledged by the bus stream (#{inspect(reason)}) -- it may not have been stored",
-        opts
-      )
-
-  defp bus_error(reason, opts), do: daemon_error("bus error: #{inspect(reason)}", opts)
 
   @doc """
   Loads `path` (when given) through `Kazi.Goal.Loader` — the SAME loader

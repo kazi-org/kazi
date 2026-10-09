@@ -1,5 +1,7 @@
 # ADR 0067: Session coordination bus -- operator sessions become first-class participants on the JetStream substrate
 
+> Superseded for the session bus on 2026-10-04: kazi messaging was removed in favour of [Ajent](../ajent.md). This document records the historical implementation.
+
 ## Status
 Accepted
 
