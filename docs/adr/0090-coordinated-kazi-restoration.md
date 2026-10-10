@@ -17,7 +17,7 @@ This specializes the existing Sire-governed bounded-job direction, not a competi
 
 All child workers and independent reviewers inherit the current selected harness/model/reasoning/auth route, with no implicit fallback or budget reset. Deterministic code owns eligibility, claims, receipt checks, timers and recovery. Independent review remains separate even when using identical session settings.
 
-Keep bounded execution, attended full delivery and unattended whole-plan operation as distinct receipts. A bounded opt-in may ship first; no unattended-default cutover before real Foundry/APRL/fleetd/Kazi qualification. E33 is on the critical path now, with safe interface work parallel to the skills/executor work.
+Keep bounded execution, attended full delivery and unattended whole-plan operation as distinct receipts. A bounded opt-in may ship first; no unattended-default cutover before real Foundry/APRL/fleetd/Kazi qualification. After acceptance, the skills owner must deliver the reviewed route candidate, install the approved artifact and independently verify the active default; permission to enable is not evidence of enabled behavior. E33 is on the critical path now, with safe interface work parallel to the skills/executor work.
 
 Preview/staging checkpoints remain pending while eligible work continues unless explicitly decision-gated. Own checkpoint and target mutations; bind feedback to immutable artifacts or explicit staging supersession. Production and new spend remain separately authorized.
 
