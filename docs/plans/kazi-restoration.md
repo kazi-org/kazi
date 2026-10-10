@@ -24,16 +24,65 @@ The source/owner-policy, admission, executor and result interface names, version
 
 ## Dependencies on existing owners
 
-Foundry [ADR0009](https://github.com/sirerun/foundry/blob/453076eed2057edc3335304c4488b7a2db8dbe81/docs/adr/0009-persistent-plan-maintenance-and-dispatch.md) and [E33](https://github.com/sirerun/foundry/blob/453076eed2057edc3335304c4488b7a2db8dbe81/docs/plans/E33-persistent-coordination.md) are the source baseline, not current runtime evidence. Reconcile their latest revisions and claims before scheduling.
+Foundry [PR47](https://github.com/sirerun/foundry/pull/47), landed at `681532a`, supplies the current single-source planning baseline. Its authoritative `docs/plan.md` retains E33 canonical task IDs; ADR0009 supplies the persistent-owner decision. The earlier PR46 revision `453076e` remains historical context. Reconcile exact current source and claims before scheduling; a landed planning document is not runtime evidence.
 
 - T33.0/T33.1 own native interface freeze and prerequisites; T33.2-T33.6 own persistence, maintenance/refill and execution adapters.
 - T33.7-T33.9 own integrated verification, review and immutable local artifact.
 - T33.10/T33.11 own authorized bounded local activation; T33.12 owns disconnected full-cycle acceptance; T33.13 owns12hour recovery/continuity; T33.14 owns operations handoff.
 - T33.15 and AWS/production are outside this restoration's local acceptance. Their absence cannot block unrelated local interface/source work.
 - APRL and fleetd retain their actual task IDs/admission; T1.1 records exact qualified versions and canonical task references. Missing mappings remain blocked, never guessed.
-- Foundry E33 remains open. Its legacy split plan has earlier parser/checkpoint evidence only; evidence-preserving repair and the T33.0 freeze are required before affected dispatch under current policy. Preserve canonical IDs and history rather than copying or relabeling its authority. Current session inheritance supersedes historical model-specific owner labels. T31.33 is the local operations acceptance; T31.34 remains separate AWS acceptance.
+- Foundry PR47 completed the evidence-preserving single-source plan repair; its owner reports 488 tasks with 481 prior obligations retained. E33 implementation and the T33.0 interface freeze remain open. T33.16 and its source delivery gates own ordinary authored-source admission; T33.17 owns the checkpoint interface and T33.18 the receipt handoff. These are external prerequisites, not Kazi implementation tasks. Current session inheritance supersedes historical model-specific owner labels. T31.33 is local operations acceptance; T31.34 remains separate AWS acceptance.
 
 These external references are evidence obligations, not locally dispatchable replicas. Local dependency lists contain only this document's IDs. T6.1 explicitly checks owner-qualified external receipts before unattended cutover. Typed external semantics remain in the owning service and explicit acceptance; do not weaken them into local checkbox completion.
+
+## Kazi-owned implementation detail
+
+This amendment refines KR1, KR2 and KR4 in the existing authority. It preserves all original task IDs and acceptance text. T2.1 becomes the joined verification gate for three explicit implementation members; it is no longer a second assignment to implement the same work. KR0 adds a separate baseline-test correction required by the existing failed delivery gate. KR3/KR5 remain skills-owned; native E33/APRL/fleetd work remains external. Planning does not execute any of these rows.
+
+### Current source evidence and use cases
+
+At Kazi `6774e2b3`, `lib/kazi/harness/profiles/codex.ex` builds an execution command with JSON and optional model only; `lib/kazi/harness/registry.ex` lists Codex command/model options, and `lib/kazi/harness.ex` filters unsupported options. This is not demonstrated reasoning-setting or authentication-route inheritance. `lib/kazi/context/repair_handoff.ex` records task/worktree identity and measured repair data; it is not evidence that a harness thread survives restart. `lib/kazi/scheduler/serial_landing.ex` can choose repository integration independently of the goal's integration mode. `lib/kazi/cli.ex` contains lane-contract, single-node and integration-command seams to investigate and reuse before inventing alternatives.
+
+| Use case | Kazi-owned result | Principal source and regression seams |
+|---|---|---|
+| KE01 | One accepted batch preserves source identity and resolved session selection | harness.ex, harness/registry.ex, harness/profiles/codex.ex, harness/profiles/claude.ex; harness/codex_profile_test.exs and harness/cli_adapter_test.exs |
+| KE02 | Candidate stays recoverable and cannot publish before its outer gate | cli.ex, scheduler/serial_landing.ex, actions/integrate.ex; cli_lane_contract_test.exs and scheduler/serial_landing_test.exs |
+| KE03 | Interrupted attempts reconcile without duplicate work or replenished budgets | context/repair_handoff.ex, context/stuck_bundle.ex, read_model/run_registry.ex, loop/budget.ex; context/repair_handoff_test.exs and read_model/run_registry_test.exs |
+| KE04 | A real bounded batch returns per-member proof usable by independent delivery | existing live-harness and lane-contract tests plus a neutral canary fixture qualified at T1.1; test/kazi/codex_live_test.exs is a discovery seam, not a qualified current subscription recipe |
+
+Source paths above are under `lib/kazi` and test paths under `test/kazi` unless fully qualified. T1.1 confirms current symbols and related callers before freezing edit ownership. There is no qualified code graph in the planning evidence; scoped source inspection supplies this inventory.
+
+### KR1 contract deliverable
+
+Freeze a versioned, reviewable source/owner-policy, admission, executor and result mapping before dispatch. Specify schema location and exact input/output examples using the current Wazi contract; do not invent a CLI flag or promise an implemented API in this plan. The executable contract is derived from authenticated authored source and explicit policy bindings. Preserve opaque acceptance verbatim while recording the separately reviewed machine checks, their IDs and source acceptance mapping. Unknown machine-check meaning is a blocked authoring decision, not guessed success.
+
+The mapping must carry stable plan/task/member IDs, source revision/digest, policy/profile revision, outer authority and canonical unit where admitted, logical run and attempt, claim/dispatch fencing generations, exact candidate base/head, inherited harness/model/reasoning/auth-route binding, role and complete contributor identity, deadline and remaining attempt/cost limits, permitted effects, per-member predicate evidence and durable artifact references. No credential value travels in the plan, gossip, launch log or receipt. Source qualification and service admission are distinct checks; ordinary source export cannot impersonate canonical APRL membership.
+
+Read/explain examples must cover valid ordinary source, native admission, unsupported stage, source mutation after planning, missing reasoning binding, changed policy, stale attempt, wrong candidate, missing evidence and canceled/unknown result. Pin actual consumer contracts jointly with Foundry T33.0/T33.16 and the skills adapter; no live route may consume a proposed version as qualified. Preserve Wazi0.0.1 unless a demonstrated representation gap requires steward action.
+
+### KR2 source ownership and execution policy
+
+T2.1.1 owns launch selection and retained batch context. Verify the current installed CLI surface on the qualified execution host; resolve the parent's selected settings explicitly and refuse unsupported or unresolvable values before dispatch. Authentication uses an already qualified host binding; no credential migration or paid API fallback follows from model selection. Keep members of one coherent batch in one harness context, including declared internal dependencies. Record whether repair reuses that context or reconstructs it from a durable checkpoint; report context resets honestly. A handoff summary is not a resumed thread.
+
+T2.1.2 owns candidate custody. Reuse existing governed-lane seams if their behavior qualifies. One owner reserves the isolated workspace; outer controller ownership must not cause a second task branch or collide with a Kazi-owned branch. Integration mode alone is not a safety proof. Assert that implementation cannot create a PR, push remote refs, merge, grant itself broader authority or erase its candidate on success, failure, deadline, cancellation or ambiguous handoff. Use a disposable local remote and instrumented mutation boundary for deterministic tests; any real GitHub check requires its exact finite scope. Record candidate identity and custody transfer before cleanup; never remove another lane's state.
+
+T2.1.3 owns attempt and result reconciliation within the admitted batch, not whole-plan supervision. Reconcile worker identity, source/patch identity, claim generation, remaining budget and terminal state before resume or relaunch. Reject late/stale/duplicate/premature-done output without advancing dependents. A crash between effect and receipt remains unknown until reconciled. Cancellation and pause survive restart; no new attempt silently resets the logical allowance. Persist per-member observations and artifacts separately from qualified acceptance. Foundry/APRL validates and advances its authoritative lifecycle; Kazi does not manufacture that authority.
+
+The three members form one coherent executor candidate with a default ceiling of three implementation members, one coordinator and separate independent review. Split only when source ownership or contract changes make one candidate unsafe; every resulting candidate then gets its own visible verify/review/merge/landed gates before downstream use. Aggregate verification includes all three members. T2.1 is the joined qualification observation; T2.2-T2.5 are its explicit evidence and source-delivery gates.
+
+### KR4 actual qualification and handoff
+
+Before a real harness invocation, bind reviewed executable source, isolated workspace/remote, supported subscription-auth route, inherited selection, permitted repository effects, finite attempts/deadline/cost envelope, cleanup owner and evidence destination. Qualification requires real available capacity; this planning document supplies neither a credential nor a paid allowance. Missing admission blocks live trials while deterministic source checks may proceed.
+
+Record separate receipts for deterministic 15/5/3 scheduling, one real internally dependent multi-member batch, and actual concurrency at the admitted capacity. The real batch must perform useful code changes, detect and repair a failing check, submit candidate evidence, encounter an independently recorded finding, correct it and obtain fresh independent approval before one guarded landing. Preserve exact subjects across any rebase. Seeded failures remain harmless and isolated; no intentionally broken production change. A capacity-limited run reports its actual concurrency and does not claim three live workers.
+
+Exercise cancellation, deadline, disconnect, process death, stale result, duplicate result and missing evidence at the job boundary. State precisely which process was interrupted and which durable owner recovered it. Bounded-attempt recovery and attended delivery are distinct from Foundry's client-disconnected whole-plan operation. KR4 returns source, artifact, check, reviewer, landing and remaining-capability receipts to skills KR5 and native owners; it cannot enable unattended defaults or satisfy E33's 12-hour acceptance.
+
+### Planning and verification bindings
+
+Planning uses an isolated DGX worktree. The shared plan validator, actual Wazi Markdown reader, deterministic repair preview and owning semantic validator are qualified against pinned contract0.0.1. Capture their digests and the exact authored revision in the receipt. GitHub operations use gh; failed hosted code tests remain failures, not billing unavailability. The Linux host owns future source builds and tests; toolchain, caches, capacity and build custody must be qualified at execution time. No Mac build or code worker is introduced.
+
+Future executor verification should start with affected harness, lane-contract, serial-landing, repair-handoff and run-registry tests, then the repository's required formatting and complete test gates. Runtime tool flags and current harness auth/continuation behavior are not qualified by this source-only plan. KR0 reproduces the existing LeaseMapLiveSourceTest mismatch before proposing its smallest correction; preserve both explicit Transport selection and Native fallback, and restore application configuration between tests. Do not change runtime selection merely to satisfy a historical test or mark the failing test skipped.
 
 ## Verification, checkpoints and stop conditions
 
@@ -51,8 +100,9 @@ On failed checks or accepted review findings, the owning service creates stable 
 
 | Batch | Outcome / members | Owner | Prerequisites | Verification and delivery | Split conditions |
 |---|---|---|---|---|---|
+| KR0 | Restore the baseline check T0.1,T0.2 | kazi-baseline owner | no runtime dispatch from planning | T0.3-T0.6 | intended coordination semantics differ from source evidence |
 | KR1 | Freeze interfaces T1.1 | kazi-coordinator with skills/Foundry input | source and claim reconciliation | T1.2-T1.5 | unresolved authority or schema representation |
-| KR2 | Qualify bounded executor T2.1 | kazi-implementation | T1.5 | T2.2-T2.5 | harness/context/custody incompatibility |
+| KR2 | Launch/context T2.1.1, custody T2.1.2, attempt/results T2.1.3; join T2.1 | kazi-implementation | T1.5,T0.6 | T2.1-T2.5 cover all three members | harness/context/custody incompatibility |
 | KR3 | Route skills T3.1 | skills | T1.5; development may overlap KR2 on frozen interfaces, live enablement waits T2.5 | T3.2-T3.5 | missing capability or adapter version |
 | KR4 | Prove attended delivery T4.1 | kazi-coordinator and independent reviewer | T2.5,T3.5 | T4.2-T4.5 | finite live capacity unavailable |
 | KR5 | Release labeled bounded route T5.1 | skills | T4.5 | T5.2-T5.5 | active installation differs or unattended claims leak |
@@ -67,6 +117,15 @@ Acceptance: bounded execution and attended delivery are separately evidenced; un
 fidelity: executable
 
 
+#### KR0 -- Existing source-check blocker
+
+- [ ] T0.1 Reproduce and freeze the baseline coordination-source mismatch  Owner: kazi-coordinator  Est: dispatch-estimate  kind: agent  stage: preflight  verifies: [KE00]  deps: []  acc: [Exact base and candidate configuration reproduce LeaseMapLiveSourceTest expectation mismatch; current explicit coordination_opts and Native fallback contract established from source and tests; minimal correction scope and any contrary evidence recorded without skipping checks]
+- [ ] T0.2 Repair only the confirmed baseline test contract  Owner: kazi-baseline  Est: dispatch-estimate  kind: agent  stage: implement  verifies: [KE00]  deps: [T0.1]  acc: [Confirmed stale daemon-socket test setup and documentation corrected to exercise intended explicit Transport and Native paths with restored application state; existing runtime behavior retained unless a separately reviewed scope correction proves it wrong; no disabled assertion or unrelated executor change]
+- [ ] T0.3 Verify baseline correction on qualified DGX resources  Owner: verifier  Est: dispatch-estimate  kind: agent  stage: verify  verifies: [KE00]  deps: [T0.2]  acc: [Focused source-selection and LiveView checks plus required formatter and complete suite pass at exact candidate under qualified Linux toolchain and capacity; before-fix failure and after-fix result retained; unavailable and failing checks reported honestly]
+- [ ] T0.4 Independently review the baseline correction  Owner: independent-reviewer  Est: dispatch-estimate  kind: agent  stage: review  verifies: [KE00]  deps: [T0.3]  acc: [Separate session reviews exact base head test behavior and environment isolation; accepted findings receive explicit fix verify and re-review obligations; complete contributor independence and final approval recorded]
+- [ ] T0.5 Guarded rebase merge the baseline correction  Owner: coordinator  Est: dispatch-estimate  kind: agent  stage: merge  verifies: [KE00]  deps: [T0.4]  acc: [Current required checks and exact-head independent approval permit ordinary GitHub rebase merge without policy bypass; landed source recorded]
+- [ ] T0.6 Verify the landed baseline and requalify planning candidates  Owner: independent-verifier  Est: dispatch-estimate  kind: agent  stage: verify-landed  verifies: [KE00]  deps: [T0.5]  acc: [Landed source equivalence and required checks verified; planning owners reconcile PR1863 and follow-up candidates with fresh conformance review and checks before merge; repaired baseline is not runtime restoration evidence]
+
 #### KR1
 
 - [ ] T1.1 Freeze source policy admission executor and result interfaces  Owner: kazi-coordinator  Est: dispatch-estimate  kind: agent  stage: preflight  deps: []  acc: [Current source and claims reconciled; Kazi Foundry and skills approve versioned source owner-policy admission executor and result contracts; ordinary Markdown and native identity plus exact revision digest acceptance and typed evidence mapping preserved; unsupported stale ambiguous inputs refuse execution; concrete gaps go to Wazi without speculative schema fork; E33 APRL fleetd canonical dependencies and finite resource policy recorded]
@@ -77,7 +136,11 @@ fidelity: executable
 
 #### KR2
 
-- [ ] T2.1 Qualify retained bounded Kazi execution and candidate custody  Owner: kazi-implementation  Est: dispatch-estimate  kind: agent  stage: implement  deps: [T1.5]  acc: [Actual launch preserves inherited harness model reasoning and authentication route; retained multi-member context and per-member subject-bound evidence demonstrated; success failure cancellation and unknown launch cannot publish or merge ahead of outer authority; attempt recovery preserves candidate artifacts ownership budget and cooldown]
+- [ ] T2.1.1 Preserve inherited launch selection and retained batch context  Owner: kazi-implementation  Est: dispatch-estimate  kind: agent  stage: implement  verifies: [KE01]  deps: [T1.5, T0.6]  acc: [Frozen adapter preserves resolved harness model reasoning and qualified auth route across all batch members; unsupported or missing bindings refuse before launch; actual continuation versus reconstruction is observable; fixtures and qualified harness checks reject silent fallback and per-member context loss]
+- [ ] T2.1.2 Enforce admitted candidate custody before publication  Owner: kazi-implementation  Est: dispatch-estimate  kind: agent  stage: implement  verifies: [KE02]  deps: [T1.5, T0.6]  acc: [One isolated workspace and recorded outer authority retain candidate through success failure cancel timeout and unknown handoff; observed remote refs PR and integration boundaries cannot mutate before authorized delivery; no unsafe branch collision foreign cleanup or integration-mode-only assumption]
+- [ ] T2.1.3 Reconcile bounded attempts and subject-bound member results  Owner: kazi-implementation  Est: dispatch-estimate  kind: agent  stage: implement  verifies: [KE03]  deps: [T1.5, T0.6]  acc: [Durable source candidate claim generation worker identity remaining allowance and per-member evidence survive interruption; stale duplicate late canceled missing or premature-done results cannot advance authority; unknown effects reconcile before retry and logical budgets never reset; no whole-plan scheduler added]
+
+- [ ] T2.1 Qualify retained bounded Kazi execution and candidate custody  Owner: kazi-implementation  Est: dispatch-estimate  kind: agent  stage: verify  deps: [T2.1.1, T2.1.2, T2.1.3]  acc: [Actual launch preserves inherited harness model reasoning and authentication route; retained multi-member context and per-member subject-bound evidence demonstrated; success failure cancellation and unknown launch cannot publish or merge ahead of outer authority; attempt recovery preserves candidate artifacts ownership budget and cooldown]
 - [ ] T2.2 Verify KR2 candidate and evidence  Owner: verifier  Est: dispatch-estimate  kind: agent  stage: verify  deps: [T2.1]  acc: [Relevant behavioral fixtures and negative cases plus required formatting lint and conformance checks pass at exact source; record commands results and gaps; KR3 live tests wait for T2.5; no hosted CI live-provider or unattended claim from local fixtures]
 - [ ] T2.3 Independently review KR2 candidate  Owner: independent-reviewer  Est: dispatch-estimate  kind: agent  stage: review  deps: [T2.2]  acc: [Separate session reviews full KR2 candidate including plan and evidence at exact base and head with contributor independence; concrete accepted findings resolved through fixes affected checks and re-review; approval bound to current subject]
 - [ ] T2.4 Guarded rebase merge KR2 artifact  Owner: coordinator  Est: dispatch-estimate  kind: agent  stage: merge  deps: [T2.3]  acc: [Current checks and independent exact-head approval satisfy repository policy; guarded GitHub rebase merge preserves protections and records source receipt without fabricated statuses]
@@ -125,3 +188,10 @@ fidelity: executable
 This is a planning artifact. All task checkboxes remain open until evidence is recorded by their actual owner. Planning-document review/merge does not complete the execution tasks above. This document's Wazi gate validates source reader compatibility, pinned schema and semantics; it does not authenticate runtime receipts or admit work.
 
 Open gates: exact live source-policy/admission mapping; inherited executor selection and context; remote candidate custody; persistent E33 service; qualified APRL/fleetd and shared admission; actual bounded/attended/unattended receipts. Missing tools or source schema incompatibility leave a blocked draft. Current APIs, activation commands and machine acceptance are frozen through T1.1 rather than invented here.
+
+
+## Kazi planning amendment evidence — 2026-10-10
+
+The Kazi owner requested planning only. This amendment preserves the original 34 task IDs and all original acceptance strings, adds six KR0 baseline-delivery rows and three KR2 implementation members, and deliberately changes T2.1 from implement to joined verify. Original dependencies change only for that integration gate. No existing checkbox is completed. The original PR1863 source remains independently owned; this follow-up is based on its reviewed head `f0f724bc` and does not mutate that branch.
+
+Hosted runs `38036891756` on the shared planning candidate and `37897267548` on base `6774e2b3` both report the LeaseMapLiveSourceTest line103 failure, with 4693 of 4694 tests passing. Source inspection confirms the socket-only historical expectation conflicts with current explicit coordination-source selection. This is a real code-test gate failure; the documentation candidate does not repair it. KR0 records bounded future remediation. This plan cannot be reported landed while its required delivery checks or ancestor delivery remain unresolved.
