@@ -16,6 +16,13 @@
 > `kazi plan`, and `mix kazi.apply` instead. See
 > [docs/deprecations.md](docs/deprecations.md) for the migration.
 
+## [2.0.1](https://github.com/kazi-org/kazi/compare/v2.0.0...v2.0.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* reject worktree cleanup of root and protected ancestors ([f2f5414](https://github.com/kazi-org/kazi/commit/f2f541444bc27a9780d4a5390fc10e44602788cd))
+
 ## [2.0.0](https://github.com/kazi-org/kazi/compare/v1.297.1...v2.0.0) (2026-10-09)
 
 
