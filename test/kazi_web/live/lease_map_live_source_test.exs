@@ -9,12 +9,12 @@ defmodule KaziWeb.LeaseMapLiveSourceTest do
     * with no daemon the view falls back to the Native source and renders
       today's output unchanged (no crash, no 500);
     * the source choice is observable (the `data-source` attribute carries the
-      selected module), not hardcoded — including the daemon-up default flipping
-      to the transport-backed source.
+      selected module), not hardcoded — including explicit coordination configuration selecting
+      the transport-backed source while a daemon socket alone stays Native.
 
   Hermetic: the "daemon" is a bare Unix-socket listener
   (`Kazi.TestSupport.FakeDaemonSocket`); the roster snapshot is the in-memory
-  fixture source. No real daemon, no NATS.
+  fixture source or in-memory transport. No real daemon, no NATS.
   """
   use KaziWeb.ConnCase, async: false
 
@@ -25,13 +25,16 @@ defmodule KaziWeb.LeaseMapLiveSourceTest do
   setup do
     prev_source = Application.get_env(:kazi, :lease_map_source)
     prev_sock = Application.get_env(:kazi, :lease_map_daemon_sock)
+    prev_opts = Application.get_env(:kazi, :coordination_opts)
     prev_table = Application.get_env(:kazi, :native_lease_table)
     prev_refresh = Application.get_env(:kazi, :lease_map_refresh_ms)
     Application.delete_env(:kazi, :lease_map_source)
+    Application.delete_env(:kazi, :coordination_opts)
 
     on_exit(fn ->
       restore(:lease_map_source, prev_source)
       restore(:lease_map_daemon_sock, prev_sock)
+      restore(:coordination_opts, prev_opts)
       restore(:native_lease_table, prev_table)
       restore(:lease_map_refresh_ms, prev_refresh)
     end)
@@ -92,7 +95,7 @@ defmodule KaziWeb.LeaseMapLiveSourceTest do
     refute html =~ "No instances present"
   end
 
-  test "with a live daemon socket the selected source is Transport, observable in the markup",
+  test "a live daemon socket alone keeps the Native source, observable in the markup",
        %{conn: conn} do
     isolated_table()
     sock = FakeDaemonSocket.start!(%{"ok" => true})
@@ -100,10 +103,39 @@ defmodule KaziWeb.LeaseMapLiveSourceTest do
 
     {:ok, _view, html} = live(conn, ~p"/leases")
 
-    assert html =~ ~s(data-source="KaziWeb.CoordinationSource.Transport")
-    # The fake daemon carries no NATS, so the roster degrades to the honest
-    # empty state — rendered, not raised.
+    assert html =~ ~s(data-source="KaziWeb.CoordinationSource.Native")
     assert html =~ ~s(id="presence-empty")
+  end
+
+  test "explicit coordination options select Transport and render its presence and leases",
+       %{conn: conn} do
+    isolated_table()
+    {:ok, bus} = Kazi.Coordination.Transport.Memory.start_link()
+    {:ok, store} = Kazi.Coordination.Lease.Memory.start_link()
+
+    opts = [
+      transport: Kazi.Coordination.Transport.Memory,
+      bus: bus,
+      lease_backend: Kazi.Coordination.Lease.Memory,
+      store: store,
+      now_ms: 1_000
+    ]
+
+    :ok = Kazi.Coordination.Presence.announce_presence("transport-session", opts)
+    :ok = Kazi.Coordination.Presence.announce_intent("transport-session", "lib/auth", opts)
+
+    {:ok, _lease} =
+      Kazi.Coordination.Lease.Memory.acquire("lib/auth", "transport-session", 30_000, opts)
+
+    Application.put_env(:kazi, :coordination_opts, opts)
+
+    {:ok, _view, html} = live(conn, ~p"/leases")
+
+    assert html =~ ~s(data-source="KaziWeb.CoordinationSource.Transport")
+    assert html =~ ~s(id="presence-transport-session")
+    assert html =~ ~s(id="lease-lib/auth")
+    assert html =~ ~s(data-holder="transport-session")
+    refute html =~ ~s(id="presence-empty")
   end
 
   test "with no daemon the view falls back to Native and renders today's output unchanged",
