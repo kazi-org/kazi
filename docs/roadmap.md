@@ -60,3 +60,11 @@ Update this roadmap when an accepted decision, delivered milestone or evaluation
 changes these priorities. Keep task mechanics in epic files and measurements in
 reports. Earlier horizon proposals and release narratives are
 [historical](https://github.com/kazi-org/kazi/blob/4549096bb9a15d2a3e03715ea80807215cbaa89d/docs/roadmap.md).
+
+## Coordinated restoration
+
+The bounded Kazi and unattended Foundry integration sequence is recorded in the
+[restoration plan](plans/kazi-restoration.md) and
+[ADR0090](adr/0090-coordinated-kazi-restoration.md). This is a gated planning artifact,
+not runtime admission or evidence of unattended operation. Existing backlog and
+canonical service tasks retain their authority.
