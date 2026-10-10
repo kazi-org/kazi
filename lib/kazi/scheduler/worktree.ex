@@ -415,6 +415,19 @@ defmodule Kazi.Scheduler.Worktree do
   @doc false
   @spec safe_cleanup(String.t(), Path.t(), Path.t()) :: :ok
   def safe_cleanup(git_cmd, repo, path) do
+    # Refuse protected paths before salvage or any git command can mutate them.
+    if protected_cleanup_path?(repo, path) do
+      Logger.error(fn ->
+        "kazi.scheduler.worktree REFUSING cleanup of a cwd/repo ancestor: #{path}"
+      end)
+
+      :ok
+    else
+      do_safe_cleanup(git_cmd, repo, path)
+    end
+  end
+
+  defp do_safe_cleanup(git_cmd, repo, path) do
     # Preserve any uncommitted collateral BEFORE the destructive force-remove
     # (issue #1081). Both terminal paths -- teardown/6 and reap/3 -- funnel here,
     # so salvaging in one place fixes the leak/delete asymmetry symmetrically.
@@ -506,35 +519,29 @@ defmodule Kazi.Scheduler.Worktree do
   # — i.e. a real, separate worktree directory. This is the textual companion to
   # the operator's Worktree Guardrail (never rm -r a cwd worktree).
   defp guarded_rm_rf(repo, path) do
-    abs_path = Path.expand(path)
-    abs_repo = Path.expand(repo)
-    cwd = File.cwd!() |> Path.expand()
+    # Re-check immediately before the fallback as cwd may have changed.
+    if protected_cleanup_path?(repo, path) do
+      Logger.error(fn ->
+        "kazi.scheduler.worktree REFUSING to rm a cwd/repo ancestor: #{path}"
+      end)
 
-    cond do
-      abs_path in [cwd, abs_repo] ->
-        Logger.error(fn ->
-          "kazi.scheduler.worktree REFUSING to rm a cwd/repo path: #{abs_path}"
-        end)
-
-        :ok
-
-      cwd_inside?(cwd, abs_path) ->
-        Logger.error(fn ->
-          "kazi.scheduler.worktree REFUSING to rm a path containing the cwd: #{abs_path}"
-        end)
-
-        :ok
-
-      true ->
-        _ = File.rm_rf(abs_path)
-        :ok
+      :ok
+    else
+      _ = File.rm_rf(Path.expand(path))
+      :ok
     end
   end
 
-  # Is `cwd` inside (a descendant of) `path`? If so, removing `path` would delete
-  # the cwd — forbidden.
+  defp protected_cleanup_path?(repo, path) do
+    abs_path = Path.expand(path)
+    cwd_inside?(Path.expand(File.cwd!()), abs_path) or cwd_inside?(Path.expand(repo), abs_path)
+  end
+
+  # Compare components: concatenating "/" makes the root prefix "//", which
+  # incorrectly excludes every descendant and can permit deleting the root.
   defp cwd_inside?(cwd, path) do
-    String.starts_with?(cwd <> "/", path <> "/")
+    parent = Path.split(path)
+    Enum.take(Path.split(cwd), length(parent)) == parent
   end
 
   # --- naming -----------------------------------------------------------------
