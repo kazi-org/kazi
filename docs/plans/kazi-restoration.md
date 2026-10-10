@@ -20,7 +20,7 @@ Wazi owns pinned contract0.0.1 and semantic validation. Ordinary Markdown and na
 
 Foundry E33 is the single durable whole-plan owner: supervised service, single-writer store/event journal, fenced leases and periodic reconciliation. APRL alone owns canonical enrolled lifecycle admission and author/review/fix/re-review/merge/landing successors. fleetd owns physical sessions. Kazi owns one admitted bounded author/fix/check batch and attempt recovery. plan/apply/ship are clients. No second whole-plan Kazi supervisor is proposed.
 
-The source/owner-policy, admission, executor and result interface names, versions and custody rules must be frozen in T1.1 before implementation. Stable logical IDs, exact source and policy digest, execution generation, candidate base/head, per-member outcomes, contributor identity, idempotency key and remaining budget must cross these seams. A model's done statement, checkbox, raw process exit or projection cannot authenticate success. Unsupported, stale, ambiguous or unavailable inputs fail closed with explicit reasons.
+The source/owner-policy, admission, executor and result interface names, versions and custody rules must be frozen in T1.1 before implementation. Stable logical IDs, exact source and policy digest, claim and dispatch generations, role and contributor independence, candidate base/head and artifact/check binding, per-member outcomes and unknown-result semantics, idempotency key and remaining attempt/deadline/cost budget must cross these seams. A model's done statement, checkbox, raw process exit or projection cannot authenticate success. Unsupported, stale, ambiguous or unavailable inputs fail closed with explicit reasons.
 
 ## Dependencies on existing owners
 
@@ -31,6 +31,7 @@ Foundry [ADR0009](https://github.com/sirerun/foundry/blob/453076eed2057edc333530
 - T33.10/T33.11 own authorized bounded local activation; T33.12 owns disconnected full-cycle acceptance; T33.13 owns12hour recovery/continuity; T33.14 owns operations handoff.
 - T33.15 and AWS/production are outside this restoration's local acceptance. Their absence cannot block unrelated local interface/source work.
 - APRL and fleetd retain their actual task IDs/admission; T1.1 records exact qualified versions and canonical task references. Missing mappings remain blocked, never guessed.
+- Foundry E33 remains open. Its legacy split plan has earlier parser/checkpoint evidence only; evidence-preserving repair and the T33.0 freeze are required before affected dispatch under current policy. Preserve canonical IDs and history rather than copying or relabeling its authority. Current session inheritance supersedes historical model-specific owner labels. T31.33 is the local operations acceptance; T31.34 remains separate AWS acceptance.
 
 These external references are evidence obligations, not locally dispatchable replicas. Local dependency lists contain only this document's IDs. T6.1 explicitly checks owner-qualified external receipts before unattended cutover. Typed external semantics remain in the owning service and explicit acceptance; do not weaken them into local checkbox completion.
 
