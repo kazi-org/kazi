@@ -208,18 +208,29 @@ defmodule Kazi.Scheduler.WorktreeTest do
       assert log =~ "REFUSING"
     end
 
-    test "safe_cleanup REFUSES to rm a path that contains the current cwd", ctx do
+    test "safe_cleanup refuses root, cwd, repo and their ancestors before invoking git", ctx do
       cwd = File.cwd!()
-      # A path that is an ancestor of the cwd (so removing it would delete cwd).
-      ancestor = cwd |> Path.dirname() |> Path.dirname()
+      marker = Path.join(ctx.base, "cleanup-git-called")
+      fake_git = Path.join(ctx.base, "cleanup-git-spy")
+      File.mkdir_p!(ctx.base)
 
-      log =
-        capture_log(fn ->
-          assert Worktree.safe_cleanup("git", ctx.repo, ancestor) == :ok
-        end)
+      # Always succeed without touching the target. A regressed guard therefore
+      # fails this assertion without ever reaching the destructive fallback.
+      File.write!(fake_git, "#!/bin/sh\nprintf called > '#{marker}'\nexit 0\n")
+      File.chmod!(fake_git, 0o755)
+
+      for protected <- ["/", cwd, Path.dirname(cwd), ctx.repo, Path.dirname(ctx.repo)] do
+        log =
+          capture_log(fn ->
+            assert Worktree.safe_cleanup(fake_git, ctx.repo, protected) == :ok
+          end)
+
+        assert log =~ "REFUSING"
+        refute File.exists?(marker), "git was invoked for protected path #{protected}"
+      end
 
       assert File.dir?(cwd)
-      assert log =~ "REFUSING"
+      assert File.regular?(Path.join(ctx.repo, "README.md"))
     end
   end
 
