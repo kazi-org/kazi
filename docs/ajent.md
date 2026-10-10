@@ -31,14 +31,14 @@ The optional NATS lease backend remains available for resource coordination.
 
 ## Migrate existing installations
 
-The `kazi bus` command family, `kazi_bus_*` MCP tools, bus result schema,
-`kazi install-hooks`, and bus hooks in newly generated plugins are removed.
+The `kazi bus` command family, `kazi_bus_*` MCP tools, bus result schema, <!-- verb-drift:allow historical removed command -->
+`kazi install-hooks`, and bus hooks in newly generated plugins are removed. <!-- verb-drift:allow historical removed command -->
 There is no command-for-command compatibility bridge: Ajent owns its API and
 communication semantics.
 
-Before upgrading, run the previous binary's `kazi install-hooks --uninstall`
+Before upgrading, run the previous binary's `kazi install-hooks --uninstall` <!-- verb-drift:allow historical removed command -->
 for each settings scope where you installed hooks. If you have already upgraded,
-remove only hook entries whose command invokes `kazi bus hook` from your Claude
+remove only hook entries whose command invokes `kazi bus hook` from your Claude <!-- verb-drift:allow historical removed command -->
 settings; preserve other hooks. Refresh the kazi plugin to remove its old inline
 bus hook declarations, then run `ajent setup` independently.
 
